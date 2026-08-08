@@ -1,12 +1,12 @@
-name: Sudden Move Monitor
+name: Forex Scan Schedule
 
 on:
   schedule:
-    - cron: '*/20 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch:
 
 jobs:
-  monitor:
+  scan:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -22,11 +22,11 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run sudden move monitor
+      - name: Run scan
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_IDS: ${{ secrets.LINE_TARGET_IDS }}
-        run: python sudden_move_monitor.py
+        run: python main_scan.py
 
       - name: Commit updated state.json
         run: |
