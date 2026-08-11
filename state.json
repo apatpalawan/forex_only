@@ -23,7 +23,7 @@
     "box_high": 1.3946000337600708,
     "box_low": 1.3919999599456787,
     "atr_h1": 0.001305724893297468,
-    "signaled": false,
+    "signaled": true,
     "updated_at": "2026-08-11T15:41:58.188154"
   },
   "GBPUSD": {
