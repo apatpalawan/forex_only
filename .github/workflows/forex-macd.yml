@@ -29,5 +29,5 @@ jobs:
       - name: Run MACD radar scan
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TO: ${{ secrets.LINE_TO }}
+          LINE_TARGET_IDS: ${{ secrets.LINE_TARGET_IDS }}
         run: python main.py

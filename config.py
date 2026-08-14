@@ -47,7 +47,7 @@ SEND_TIMES_TH = ["09:00", "12:00", "14:00", "16:00", "19:00"]
 # LINE Messaging API (set these as GitHub Actions secrets)
 # ---------------------------------------------------------------------------
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-LINE_TO = os.environ.get("LINE_TO", "")  # user id / group id / room id to push to
+LINE_TARGET_IDS = os.environ.get("LINE_TARGET_IDS", "")  # comma-separated user/group ids to push to
 
 # Retry/network settings for yfinance fetches
 FETCH_MAX_RETRIES = 3
