@@ -1,85 +1,60 @@
 """
-ส่งข้อความเข้า LINE Official Account ผ่าน LINE Messaging API
-- ถ้าตั้งค่า LINE_TARGET_IDS (user id / group id คั่นด้วย comma) จะใช้ push API ส่งเฉพาะเป้าหมายนั้น
-- ถ้าไม่ตั้งค่า จะใช้ broadcast API ส่งไปหาทุกคนที่แอดเพื่อน OA ไว้
-
-หมายเหตุ: LINE จำกัดความยาวข้อความที่ 5000 หน่วย UTF-16 ต่อข้อความ (ไม่ใช่จำนวนตัวอักษร Python)
-emoji แบบ supplementary-plane (เช่น 💥🚀) กิน 2 หน่วย UTF-16 ต่อตัว ถ้าตัดข้อความด้วย
-Python code point เฉยๆ (text[:4900]) จะนับผิดและอาจยังเกินลิมิตจริงของ LINE อยู่ดี
-ฟังก์ชันนี้เลยนับความยาวแบบ UTF-16 จริง และแบ่งข้อความยาวเป็นหลาย push message แทนการตัดทิ้ง
+line_notify.py
+Sends the radar result to LINE via the LINE Messaging API (push message).
 """
+
 import requests
 import config
 
-PUSH_URL = "https://api.line.me/v2/bot/message/push"
-BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
-
-LINE_LIMIT_UTF16 = 4900  # เผื่อ buffer จากลิมิตจริง 5000 หน่วยของ LINE
+LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 
 
-def _headers():
-    return {
+def format_message(scan_label: str, matches: list) -> str:
+    """
+    matches: list of dicts like
+        {"symbol": "EURUSD", "direction": "BUY", "d1_cross": "CROSS UP", "h1_cross": "CROSS UP"}
+    """
+    lines = ["📊 FOREX MACD RADAR", "", f"⏰ Scan: {scan_label}", ""]
+
+    if not matches:
+        lines.append("ไม่มีคู่เงินที่ผ่านเงื่อนไขรอบนี้")
+        return "\n".join(lines)
+
+    for m in matches:
+        emoji = "🟢" if m["direction"] == "BUY" else "🔴"
+        lines.append(f"{emoji} {m['symbol']}")
+        lines.append(f"D1 : MACD {m['d1_cross']}")
+        lines.append(f"H1 : MACD {m['h1_cross']}")
+        lines.append(f"Signal : {m['direction']} BIAS")
+        lines.append("")
+
+    return "\n".join(lines).rstrip()
+
+
+def send_line_message(text: str) -> bool:
+    """Returns True only on a real confirmed success from the LINE API."""
+    if not config.LINE_CHANNEL_ACCESS_TOKEN or not config.LINE_TO:
+        print("[line_notify] Missing LINE_CHANNEL_ACCESS_TOKEN or LINE_TO env var - skipping send.")
+        return False
+
+    headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}",
     }
+    payload = {
+        "to": config.LINE_TO,
+        "messages": [{"type": "text", "text": text}],
+    }
 
-
-def _utf16_len(s):
-    return len(s.encode("utf-16-le")) // 2
-
-
-def _split_utf16(text, limit=LINE_LIMIT_UTF16):
-    """แบ่งข้อความเป็นหลายก้อน นับความยาวแบบ UTF-16 (ตรงกับที่ LINE ใช้จริง)
-    แบ่งตามบรรทัดก่อนเพื่อไม่ตัดข้อความกลางคำ/กลาง emoji"""
-    lines = text.split("\n")
-    chunks = []
-    current = ""
-
-    for line in lines:
-        candidate = current + ("\n" if current else "") + line
-        if _utf16_len(candidate) > limit and current:
-            chunks.append(current)
-            current = line
-        else:
-            current = candidate
-
-    if current:
-        chunks.append(current)
-
-    return chunks or [text]
-
-
-def _send_one(text):
-    target_ids = [t.strip() for t in config.LINE_TARGET_IDS.split(",") if t.strip()]
-
-    if target_ids:
-        for uid in target_ids:
-            payload = {"to": uid, "messages": [{"type": "text", "text": text}]}
-            resp = requests.post(PUSH_URL, headers=_headers(), json=payload, timeout=15)
-            if resp.status_code != 200:
-                print(f"[ERROR] push ไป {uid} ไม่สำเร็จ: {resp.status_code} {resp.text}")
-                return False
-    else:
-        payload = {"messages": [{"type": "text", "text": text}]}
-        resp = requests.post(BROADCAST_URL, headers=_headers(), json=payload, timeout=15)
-        if resp.status_code != 200:
-            print(f"[ERROR] broadcast ไม่สำเร็จ: {resp.status_code} {resp.text}")
-            return False
-
-    return True
-
-
-def send_line_message(text):
-    if not config.LINE_CHANNEL_ACCESS_TOKEN:
-        print("[WARN] ไม่พบ LINE_CHANNEL_ACCESS_TOKEN — พิมพ์ข้อความแทนการส่งจริง:")
-        print(text)
+    try:
+        resp = requests.post(LINE_PUSH_URL, headers=headers, json=payload, timeout=15)
+    except Exception as e:
+        print(f"[line_notify] request failed: {e}")
         return False
 
-    chunks = _split_utf16(text)
+    if resp.status_code == 200:
+        print("[line_notify] sent OK")
+        return True
 
-    ok = True
-    for chunk in chunks:
-        if not _send_one(chunk):
-            ok = False
-
-    return ok
+    print(f"[line_notify] LINE API error {resp.status_code}: {resp.text}")
+    return False

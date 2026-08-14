@@ -1,0 +1,33 @@
+name: Forex MACD Radar
+
+on:
+  schedule:
+    # Runs every 30 minutes, all day. No `timezone:` field on purpose -
+    # that field has been unreliable for triggering scheduled runs.
+    # Sending is still condition-based (only on a genuine D1+H1 cross match) -
+    # checking more often just catches a fresh cross sooner instead of waiting
+    # for the next fixed time slot.
+    - cron: "*/30 * * * *"
+  workflow_dispatch: {}
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run MACD radar scan
+        env:
+          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
+          LINE_TO: ${{ secrets.LINE_TO }}
+        run: python main.py
