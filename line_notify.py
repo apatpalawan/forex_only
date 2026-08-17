@@ -12,7 +12,7 @@ LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 def format_message(scan_label: str, matches: list) -> str:
     """
     matches: list of dicts like
-        {"symbol": "EURUSD", "direction": "BUY", "d1_cross": "CROSS UP", "h1_cross": "CROSS UP"}
+        {"symbol": "EURUSD", "direction": "BUY", "h1_cross": "CROSS UP"}
     """
     lines = ["📊 FOREX MACD RADAR", "", f"⏰ Scan: {scan_label}", ""]
 
@@ -23,7 +23,6 @@ def format_message(scan_label: str, matches: list) -> str:
     for m in matches:
         emoji = "🟢" if m["direction"] == "BUY" else "🔴"
         lines.append(f"{emoji} {m['symbol']}")
-        lines.append(f"D1 : MACD {m['d1_cross']}")
         lines.append(f"H1 : MACD {m['h1_cross']}")
         lines.append(f"Signal : {m['direction']} BIAS")
         lines.append("")

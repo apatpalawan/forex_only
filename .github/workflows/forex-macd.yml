@@ -1,33 +1,71 @@
-name: Forex MACD Radar
+"""
+main.py
+Forex + Gold MACD Radar Bot (H1-only)
 
-on:
-  schedule:
-    # Runs every 30 minutes, all day. No `timezone:` field on purpose -
-    # that field has been unreliable for triggering scheduled runs.
-    # Sending is still condition-based (only on a genuine D1+H1 cross match) -
-    # checking more often just catches a fresh cross sooner instead of waiting
-    # for the next fixed time slot.
-    - cron: "*/30 * * * *"
-  workflow_dispatch: {}
+Flow (per run):
+    H1 MACD cross scan for every symbol
+        -> any symbol with a fresh H1 cross (on the last CLOSED H1 candle)
+           is kept as a match, no other confirmation needed
+    Send one LINE message with all matches
+    Exit (nothing is persisted -> next scheduled run starts completely fresh)
+"""
 
-jobs:
-  scan:
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+import config
+import market_data
+import macd_scanner
+import line_notify
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+TH_TZ = ZoneInfo("Asia/Bangkok")
 
-      - name: Run MACD radar scan
-        env:
-          LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
-          LINE_TARGET_IDS: ${{ secrets.LINE_TARGET_IDS }}
-        run: python main.py
+
+def scan_symbol(display_name: str, ticker: str):
+    """H1-only: returns a match dict if H1 has a fresh MACD cross, else None."""
+    try:
+        h1_df = market_data.get_h1_candles(ticker)
+    except Exception as e:
+        print(f"[{display_name}] H1 fetch failed: {e}")
+        return None
+
+    h1_result = macd_scanner.detect_cross(h1_df)
+    if h1_result["cross"] is None:
+        return None  # no fresh H1 cross -> reject
+
+    print(f"[{display_name}] H1 {h1_result['cross']} at {h1_result['time']}")
+
+    direction = "BUY" if h1_result["cross"] == "UP" else "SELL"
+    return {
+        "symbol": display_name,
+        "direction": direction,
+        "h1_cross": "CROSS UP" if h1_result["cross"] == "UP" else "CROSS DOWN",
+    }
+
+
+def run():
+    now_th = datetime.now(TH_TZ)
+    scan_label = now_th.strftime("%H:%M")
+    print(f"=== FOREX MACD RADAR - scan {scan_label} TH ({now_th.isoformat()}) ===")
+
+    matches = []  # in-memory only for this run -> nothing persists between runs
+    for display_name, ticker in config.SYMBOLS.items():
+        result = scan_symbol(display_name, ticker)
+        if result:
+            matches.append(result)
+
+    print(f"Matches this round: {[m['symbol'] + ' ' + m['direction'] for m in matches]}")
+
+    message = line_notify.format_message(scan_label, matches)
+
+    if matches:
+        line_notify.send_line_message(message)
+    else:
+        print("No matches this round - not sending a LINE message.")
+        # If you'd rather always get a heartbeat message even with 0 matches,
+        # uncomment the next line:
+        # line_notify.send_line_message(message)
+
+
+if __name__ == "__main__":
+    run()
