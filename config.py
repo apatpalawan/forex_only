@@ -1,6 +1,6 @@
 """
-Forex + Gold MACD Radar Bot - Config
-D1 MACD cross -> H1 MACD cross (same direction, occurring after D1 cross) -> LINE alert
+Forex + Gold H1 Sideway-Breakout Radar Bot - Config
+Alert only when H1 breaks out of a tight (sideway) range.
 """
 
 import os
@@ -22,32 +22,42 @@ SYMBOLS = {
 }
 
 # ---------------------------------------------------------------------------
-# MACD standard settings
+# H1 data window
 # ---------------------------------------------------------------------------
-MACD_FAST = 12
-MACD_SLOW = 26
-MACD_SIGNAL = 9
-
-# ---------------------------------------------------------------------------
-# Data windows (need enough closed candles to warm up EMA26 + Signal9)
-# ---------------------------------------------------------------------------
-D1_PERIOD = "6mo"
-D1_INTERVAL = "1d"
-
 H1_PERIOD = "1mo"
 H1_INTERVAL = "1h"
 
 # ---------------------------------------------------------------------------
-# Scan rounds (Thai time) - for logging/labelling only, actual timing is
-# controlled by the GitHub Actions cron schedule
+# Sideway / breakout settings
 # ---------------------------------------------------------------------------
-SEND_TIMES_TH = ["09:00", "12:00", "14:00", "16:00", "19:00"]
+# Number of closed H1 candles used to define the "sideway" range (right before
+# the candle being checked for a breakout).
+SIDEWAY_LOOKBACK = 15
+
+# ATR period (Average True Range) used as the volatility yardstick.
+ATR_PERIOD = 14
+
+# The sideway range (high-low over SIDEWAY_LOOKBACK candles) must be <= this
+# many times the ATR to count as "tight / sideway". Lower = stricter (needs a
+# tighter range to qualify). Raise this if you want more signals, lower it if
+# you want fewer / higher-quality ones. Calibrated against simulated H1
+# ranging behavior (15-candle range typically runs ~3-4.5x the single-candle
+# ATR) - 4.5 catches most genuine consolidation while still excluding clearly
+# trending periods (which run much higher).
+ATR_MULTIPLIER = 5.0
 
 # ---------------------------------------------------------------------------
-# LINE Messaging API (set these as GitHub Actions secrets)
+# LINE Messaging API (GitHub Actions secrets already set on the repo)
 # ---------------------------------------------------------------------------
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-LINE_TARGET_IDS = os.environ.get("LINE_TARGET_IDS", "")  # comma-separated user/group ids to push to
+LINE_TARGET_IDS = os.environ.get("LINE_TARGET_IDS", "")  # comma-separated user/group ids
+
+# ---------------------------------------------------------------------------
+# State file (remembers the last alerted breakout candle per symbol, so the
+# same breakout isn't sent twice while the H1 candle is still the "latest
+# closed" one across multiple 30-min scans)
+# ---------------------------------------------------------------------------
+STATE_PATH = "state.json"
 
 # Retry/network settings for yfinance fetches
 FETCH_MAX_RETRIES = 3

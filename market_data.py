@@ -1,6 +1,6 @@
 """
 market_data.py
-Fetches D1 and H1 OHLC candles for a symbol via yfinance.
+Fetches H1 OHLC candles for a symbol via yfinance.
 
 Uses a curl_cffi browser-impersonation session to reduce the chance of
 Yahoo Finance rate-limiting/blocking requests coming from GitHub Actions'
@@ -40,11 +40,6 @@ def _fetch(ticker: str, period: str, interval: str) -> pd.DataFrame:
             # small jittered backoff before retrying
             time.sleep(config.FETCH_RETRY_DELAY_SEC + random.uniform(0, 1.5))
     raise RuntimeError(f"failed to fetch {ticker} ({interval}) after {config.FETCH_MAX_RETRIES} attempts: {last_err}")
-
-
-def get_d1_candles(ticker: str) -> pd.DataFrame:
-    """Daily candles. Caller is responsible for dropping the still-forming last bar."""
-    return _fetch(ticker, config.D1_PERIOD, config.D1_INTERVAL)
 
 
 def get_h1_candles(ticker: str) -> pd.DataFrame:

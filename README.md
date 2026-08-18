@@ -1,42 +1,46 @@
-# Forex + Gold MACD Radar Bot → ส่งเข้า LINE OA
+# Forex + Gold H1 Sideway-Breakout Radar Bot
 
-บอทสแกนคู่เงิน major/minor + ทองคำ (XAUUSD) โดยใช้ MACD:
+ส่งเข้า LINE OA **เฉพาะตอนที่ H1 breakout ออกจากช่วง sideway (consolidation) เท่านั้น**
 
-1. ตรวจ **D1** ว่ามี MACD ตัดกันใหม่ในแท่งที่ปิดแล้วหรือไม่ (CROSS UP / CROSS DOWN)
-2. ถ้าผ่าน → ตรวจ **H1** ว่ามี MACD ตัดกัน**ทิศทางเดียวกัน**กับ D1 หรือไม่ และต้องเกิด**หลังจาก**การตัดของ D1
-3. ผ่านทั้งสองขั้น → ส่งเข้า LINE OA
-4. ไม่มี state เก็บข้ามรอบ — ทุกรอบสแกนใหม่หมดอัตโนมัติ (เพราะ GitHub Actions แต่ละ run คือ process ใหม่)
+## หลักการทำงาน
 
-**ส่งเข้า LINE เฉพาะตอนที่เจอ match จริงเท่านั้น** — ถ้ารอบไหนไม่มีคู่เงินผ่านเงื่อนไข จะไม่ส่งข้อความเลย (ประหยัดโควต้า LINE)
+1. ดูแท่ง H1 ที่ปิดแล้ว 15 แท่งก่อนหน้าแท่งล่าสุด (`SIDEWAY_LOOKBACK`) — ถ้าช่วง high-low ของ 15 แท่งนี้ "แคบ" เทียบกับความผันผวนเฉลี่ย (ATR) → ถือว่าเป็นช่วง **sideway**
+2. ถ้าแท่งล่าสุดที่ปิดแล้ว **breakout ทะลุกรอบ sideway นั้น** (ปิดสูงกว่าขอบบน หรือต่ำกว่าขอบล่าง) → ถือว่าเป็น **breakout**
+3. ผ่านทั้ง 2 เงื่อนไข → ส่งเข้า LINE
+4. มี `state.json` เก็บว่าแท่งไหนแจ้งไปแล้ว (commit กลับเข้า repo อัตโนมัติหลังทุกรอบ) เพื่อไม่ให้แจ้งซ้ำแท่งเดิม 2 รอบ (เพราะสแกนทุก 30 นาที แต่แท่ง H1 ปิดทุก 1 ชม. เลยมีบางแท่งที่ถูกสแกนซ้ำ 2 รอบก่อนแท่งใหม่จะมา)
+
+## ปรับความไวของสัญญาณได้ที่ `config.py`
+
+- `SIDEWAY_LOOKBACK` (ค่าเริ่มต้น 15) — จำนวนแท่งที่ใช้กำหนดกรอบ sideway ยิ่งมากยิ่งมองภาพกว้างขึ้น
+- `ATR_PERIOD` (ค่าเริ่มต้น 14) — คาบคำนวณ ATR มาตรฐาน
+- `ATR_MULTIPLIER` (ค่าเริ่มต้น 5.0) — ยิ่งค่าน้อย ยิ่งเข้มงวด (ต้องแคบมากถึงนับเป็น sideway) ยิ่งค่ามาก ยิ่งได้สัญญาณบ่อยขึ้นแต่คุณภาพอาจลดลง — ค่านี้ปรับจากการทดสอบจำลองสถานการณ์ตลาดจริง (ช่วง 15 แท่งมักกว้างกว่า ATR ของแท่งเดียวราวๆ 3-4.5 เท่า)
 
 ## โครงสร้างไฟล์
 
 ```
-config.py            คู่เงินที่สแกน, ค่า MACD (12,26,9), LINE env vars
-market_data.py        ดึง D1/H1 candles จาก yfinance (มี browser-impersonation session กัน rate-limit)
-macd_scanner.py        คำนวณ MACD + ตรวจ "cross ใหม่" บนแท่งที่ปิดแล้วเท่านั้น
-line_notify.py         format ข้อความ + push เข้า LINE Messaging API
-main.py                 orchestrate: D1 scan → H1 confirm → ส่ง LINE
+config.py             คู่เงินที่สแกน, ค่า sideway/breakout, LINE env vars
+market_data.py         ดึง H1 candles จาก yfinance
+price_action.py         ตรวจ sideway + breakout บนแท่งที่ปิดแล้วเท่านั้น
+state_manager.py        อ่าน/เขียน state.json (กันแจ้งซ้ำ)
+line_notify.py           format ข้อความ + push เข้า LINE Messaging API
+main.py                   orchestrate: scan ทุกคู่เงิน -> ส่ง LINE -> เซฟ state
+state.json                เก็บแท่งล่าสุดที่แจ้งไปแล้วต่อคู่เงิน (เริ่มต้นว่างเปล่า)
 requirements.txt
-.github/workflows/forex-macd.yml   cron ทุก 30 นาที ตลอดวัน (24 ชม.)
+.github/workflows/sideway-breakout.yml   cron ทุก 30 นาที + commit state.json กลับ
 ```
 
-## ตั้งค่า GitHub Secrets
+## ตั้งค่า GitHub Secrets (ใช้ของเดิมที่มีอยู่แล้วได้เลย)
 
-Settings → Secrets and variables → Actions → New repository secret
-
-| Name | ค่า |
-| --- | --- |
-| `LINE_CHANNEL_ACCESS_TOKEN` | Channel access token จาก LINE Developers Console |
-| `LINE_TO` | user id / group id / room id ที่จะ push ข้อความไปหา |
+- `LINE_CHANNEL_ACCESS_TOKEN`
+- `LINE_TARGET_IDS` (comma-separated user/group ids)
 
 ## ทดสอบก่อนใช้จริง
 
 ```
 pip install -r requirements.txt
 export LINE_CHANNEL_ACCESS_TOKEN="your-token"
-export LINE_TO="your-line-id"
+export LINE_TARGET_IDS="your-line-id"
 python main.py
 ```
 
-หลัง push ขึ้น GitHub แนะนำให้กด **Run workflow** (workflow_dispatch) ทดสอบยิงจริงก่อนปล่อยรันตาม schedule
+หลัง push ขึ้น GitHub แนะนำให้กด **Run workflow** (workflow_dispatch) ทดสอบยิงจริงก่อนปล่อยรันตาม schedule — เช็ค log ว่าไม่ error และดูว่า `state.json` ถูก commit กลับเข้า repo หลังรันเสร็จ (สังเกตจาก step "Commit updated state.json" ใน log)

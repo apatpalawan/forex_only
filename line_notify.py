@@ -1,6 +1,6 @@
 """
 line_notify.py
-Sends the radar result to LINE via the LINE Messaging API (push message).
+Sends the sideway-breakout radar result to LINE via the LINE Messaging API.
 """
 
 import requests
@@ -12,9 +12,10 @@ LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 def format_message(scan_label: str, matches: list) -> str:
     """
     matches: list of dicts like
-        {"symbol": "EURUSD", "direction": "BUY", "h1_cross": "CROSS UP"}
+        {"symbol": "EURUSD", "direction": "BUY", "breakout": "BREAKOUT UP",
+         "range_high": 1.0950, "range_low": 1.0910}
     """
-    lines = ["📊 FOREX MACD RADAR", "", f"⏰ Scan: {scan_label}", ""]
+    lines = ["📊 FOREX SIDEWAY-BREAKOUT RADAR", "", f"⏰ Scan: {scan_label}", ""]
 
     if not matches:
         lines.append("ไม่มีคู่เงินที่ผ่านเงื่อนไขรอบนี้")
@@ -23,7 +24,8 @@ def format_message(scan_label: str, matches: list) -> str:
     for m in matches:
         emoji = "🟢" if m["direction"] == "BUY" else "🔴"
         lines.append(f"{emoji} {m['symbol']}")
-        lines.append(f"H1 : MACD {m['h1_cross']}")
+        lines.append(f"H1 : {m['breakout']}")
+        lines.append(f"Range : {m['range_low']:.5f} - {m['range_high']:.5f}")
         lines.append(f"Signal : {m['direction']} BIAS")
         lines.append("")
 
