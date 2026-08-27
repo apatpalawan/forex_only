@@ -1,64 +1,65 @@
 """
-Forex + Gold H1 Sideway-Breakout Radar Bot - Config
-Alert only when H1 breaks out of a tight (sideway) range.
+Config - M1 Trigger Bot (D1 -> H1 -> M15 -> M1)
+แก้ตัวเลขในไฟล์นี้ไฟล์เดียวเพื่อปรับพฤติกรรมบอท
 """
 
 import os
 
-# ---------------------------------------------------------------------------
-# Symbols: display name -> Yahoo Finance ticker
-# ---------------------------------------------------------------------------
-SYMBOLS = {
-    "EURUSD": "EURUSD=X",
-    "GBPUSD": "GBPUSD=X",
-    "USDJPY": "USDJPY=X",
-    "USDCHF": "USDCHF=X",
-    "USDCAD": "USDCAD=X",
-    "AUDUSD": "AUDUSD=X",
-    "NZDUSD": "NZDUSD=X",
-    "EURJPY": "EURJPY=X",
-    "GBPJPY": "GBPJPY=X",
-    "XAUUSD": "XAUUSD=X",   # if this ticker misbehaves on yfinance, try "GC=F" instead
-}
+# ── สัญลักษณ์ที่สแกน ────────────────────────────────────────────────
+# เฉพาะทองคำเท่านั้น
+SYMBOLS = [
+    "XAUUSD=X",
+]
 
-# ---------------------------------------------------------------------------
-# H1 data window
-# ---------------------------------------------------------------------------
-H1_PERIOD = "1mo"
-H1_INTERVAL = "1h"
+# ── D1: หาทิศทางหลัก ────────────────────────────────────────────────
+EMA_FAST = 20
+EMA_SLOW = 50
+MACD_FAST = 12
+MACD_SLOW = 26
+MACD_SIGNAL = 9
 
-# ---------------------------------------------------------------------------
-# Sideway / breakout settings
-# ---------------------------------------------------------------------------
-# Number of closed H1 candles used to define the "sideway" range (right before
-# the candle being checked for a breakout).
-SIDEWAY_LOOKBACK = 15
-
-# ATR period (Average True Range) used as the volatility yardstick.
+# ── H1: ยืนยันความแข็งแรงของเทรนด์ ──────────────────────────────────
+ADX_PERIOD = 14
+ADX_MIN = 25.0          # ADX ต้อง > ค่านี้
+ADX_MUST_RISE = True    # ADX ต้องเพิ่มขึ้นจากแท่งก่อนหน้า
 ATR_PERIOD = 14
+ATR_LOOKBACK_AVG = 50   # ใช้หาค่าเฉลี่ย ATR ย้อนหลังกี่แท่ง
+ATR_RATIO_MIN = 1.0     # ATR ปัจจุบัน / ATR เฉลี่ย ต้อง >= ค่านี้
+DI_GAP_MIN = 5.0        # |DI+ - DI-| ต้อง >= ค่านี้ (ความชัดของทิศทาง)
 
-# The sideway range (high-low over SIDEWAY_LOOKBACK candles) must be <= this
-# many times the ATR to count as "tight / sideway". Lower = stricter (needs a
-# tighter range to qualify). Raise this if you want more signals, lower it if
-# you want fewer / higher-quality ones. Calibrated against simulated H1
-# ranging behavior (15-candle range typically runs ~3-4.5x the single-candle
-# ATR) - 4.5 catches most genuine consolidation while still excluding clearly
-# trending periods (which run much higher).
-ATR_MULTIPLIER = 5.0
+# ── M15: หาโซน pullback + price action reversal ─────────────────────
+PULLBACK_EMA_TOLERANCE_PCT = 0.15   # ราคาต้องห่างจาก EMA20(M15) ไม่เกินกี่% ถึงจะนับว่า "ย่อเข้าใกล้"
+M15_LOOKBACK_BARS = 30              # ดูย้อนหลังกี่แท่ง M15 เพื่อหาแท่งกลับตัวล่าสุด
 
-# ---------------------------------------------------------------------------
-# LINE Messaging API (GitHub Actions secrets already set on the repo)
-# ---------------------------------------------------------------------------
+# ── M1: จุด trigger เข้าไม้ ──────────────────────────────────────────
+# M1 ใช้แค่ "ยืนยันแท่งปิด" ว่าราคาทะลุ high/low ของโซน M15 reversal จริง
+# ไม่ใช้ indicator ใด ๆ เพิ่มบน M1 ตามหลักการที่คุยกันไว้
+M1_CONFIRM_WINDOW_BARS = 15         # ต้องเกิด breakout ภายในกี่แท่ง M1 หลังโซน M15 พร้อม ไม่งั้นถือว่าโซนหมดอายุ
+
+# ── ตัวกรอง Session (เทรดเฉพาะช่วงสภาพคล่องสูง) ───────────────────────
+# เวลาเป็น UTC, ค่า default ครอบคลุม London + London/NY overlap
+SESSION_FILTER_ENABLED = True
+SESSION_START_UTC = 7     # London open ~07:00 UTC
+SESSION_END_UTC = 16      # หลัง NY overlap เริ่มเบาลง ~16:00 UTC
+# ปรับเป็นเวลาไทย (UTC+7) เอง: 07-16 UTC = 14:00-23:00 ไทย
+
+# ── ตัวกรองความผันผวนผิดปกติ (proxy แทน spread จริงที่ยังไม่มี broker API) ─
+SKIP_IF_M1_RANGE_RATIO_ABOVE = 3.0  # ถ้าแท่ง M1 ล่าสุดกว้างผิดปกติ (เทียบ ATR M1 เฉลี่ย) ให้ข้าม กันช่วง spike ข่าว
+
+# ── ตัวกรองข่าว (ปิดไว้ก่อนโดย default, เปิดถ้าต้องการเชื่อม calendar) ─────
+NEWS_FILTER_ENABLED = False
+NEWS_BLOCK_MINUTES_BEFORE = 30
+NEWS_BLOCK_MINUTES_AFTER = 15
+FOREX_FACTORY_JSON_URL = "https://nfs.faireconomy.media/ff_calendar_thisweek.json"
+
+# ── Money management guardrails (แจ้งเตือนอย่างเดียว ไม่ auto trade) ───────
+MAX_ALERTS_PER_SYMBOL_PER_DAY = 3   # กัน over-alert จากบอทตัวเดียวกันซ้ำ ๆ ในคู่เดิม
+
+# ── LINE ─────────────────────────────────────────────────────────────
 LINE_CHANNEL_ACCESS_TOKEN = os.environ.get("LINE_CHANNEL_ACCESS_TOKEN", "")
-LINE_TARGET_IDS = os.environ.get("LINE_TARGET_IDS", "")  # comma-separated user/group ids
+LINE_TARGET_IDS = [
+    t.strip() for t in os.environ.get("LINE_TARGET_IDS", "").split(",") if t.strip()
+]
 
-# ---------------------------------------------------------------------------
-# State file (remembers the last alerted breakout candle per symbol, so the
-# same breakout isn't sent twice while the H1 candle is still the "latest
-# closed" one across multiple 30-min scans)
-# ---------------------------------------------------------------------------
-STATE_PATH = "state.json"
-
-# Retry/network settings for yfinance fetches
-FETCH_MAX_RETRIES = 3
-FETCH_RETRY_DELAY_SEC = 2.0
+# ── State file (dedupe กันแจ้งเตือนซ้ำแท่งเดิม) ───────────────────────
+STATE_FILE = "state.json"

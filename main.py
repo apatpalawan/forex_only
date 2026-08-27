@@ -1,83 +1,62 @@
 """
-main.py
-Forex + Gold H1 Sideway-Breakout Radar Bot
+M1 Multi-Timeframe Trigger Bot
+D1 (ทิศทาง) -> H1 (ความแข็งแรง: ADX/DI/ATR) -> M15 (โซน pullback+reversal) -> M1 (trigger ยืนยันแท่งปิด)
 
-Flow (per run):
-    For each symbol:
-        - fetch H1 candles
-        - check if the SIDEWAY_LOOKBACK closed candles before the latest
-          closed candle were "sideway" (tight range vs ATR)
-        - check if the latest closed candle broke out of that range
-    Only alert for a breakout candle that hasn't been alerted before
-    (tracked in state.json, committed back to the repo after each run -
-    prevents the same breakout being sent twice while the H1 candle is
-    still the "latest closed" one across two 30-min scans in the same hour)
+รันไฟล์นี้เพื่อสแกนทุก symbol ใน config.SYMBOLS แล้วส่ง LINE เฉพาะเมื่อเจอ trigger จริงเท่านั้น
 """
 
-from datetime import datetime
-from zoneinfo import ZoneInfo
-
+import sys
 import config
-import market_data
-import price_action
-import line_notify
-import state_manager
-
-TH_TZ = ZoneInfo("Asia/Bangkok")
-
-
-def scan_symbol(display_name: str, ticker: str, state: dict):
-    try:
-        h1_df = market_data.get_h1_candles(ticker)
-    except Exception as e:
-        print(f"[{display_name}] H1 fetch failed: {e}")
-        return None
-
-    result = price_action.detect_sideway_breakout(h1_df)
-    if result["signal"] is None:
-        return None
-
-    candle_time = str(result["time"])
-    if state.get(display_name) == candle_time:
-        print(f"[{display_name}] {result['signal']} at {candle_time} already alerted - skip")
-        return None
-
-    print(f"[{display_name}] {result['signal']} at {candle_time}")
-    state[display_name] = candle_time  # mark this candle as alerted
-
-    direction = "BUY" if result["signal"] == "BREAKOUT_UP" else "SELL"
-    return {
-        "symbol": display_name,
-        "direction": direction,
-        "breakout": "BREAKOUT UP" if result["signal"] == "BREAKOUT_UP" else "BREAKOUT DOWN",
-        "range_high": result["range_high"],
-        "range_low": result["range_low"],
-    }
+from lib.data_fetcher import fetch_all_timeframes
+from lib.strategy import evaluate_symbol
+from lib.session_filter import in_trading_session
+from lib.news_filter import is_blocked_by_news
+from lib.state_manager import load_state, save_state, already_alerted, alerts_today, record_alert
+from lib.line_notify import format_m1_alert, send_line_message
 
 
 def run():
-    now_th = datetime.now(TH_TZ)
-    scan_label = now_th.strftime("%H:%M")
-    print(f"=== FOREX SIDEWAY-BREAKOUT RADAR - scan {scan_label} TH ({now_th.isoformat()}) ===")
+    if not in_trading_session():
+        print("[main] outside trading session, skip scan")
+        return
 
-    state = state_manager.load_state()
+    state = load_state()
+    sent_count = 0
 
-    matches = []
-    for display_name, ticker in config.SYMBOLS.items():
-        result = scan_symbol(display_name, ticker, state)
-        if result:
-            matches.append(result)
+    for symbol in config.SYMBOLS:
+        try:
+            if alerts_today(state, symbol) >= config.MAX_ALERTS_PER_SYMBOL_PER_DAY:
+                continue
 
-    print(f"Matches this round: {[m['symbol'] + ' ' + m['direction'] for m in matches]}")
+            candles = fetch_all_timeframes(symbol)
+            signal = evaluate_symbol(symbol, candles)
+            if signal is None:
+                continue
 
-    if matches:
-        message = line_notify.format_message(scan_label, matches)
-        line_notify.send_line_message(message)
-    else:
-        print("No matches this round - not sending a LINE message.")
+            if already_alerted(state, symbol, signal["trigger_time"]):
+                continue  # แจ้งเตือนแท่งนี้ไปแล้ว
 
-    state_manager.save_state(state)
+            if is_blocked_by_news(symbol):
+                print(f"[main] {symbol} signal found but blocked by news filter")
+                continue
+
+            text = format_m1_alert(signal)
+            sent = send_line_message(text)
+            if sent:
+                record_alert(state, symbol, signal["trigger_time"])
+                sent_count += 1
+                print(f"[main] ALERT sent: {symbol} {signal['direction']} @ {signal['trigger_price']}")
+
+        except Exception as e:
+            print(f"[main] error evaluating {symbol}: {e}")
+
+    save_state(state)
+    print(f"[main] scan done, alerts sent: {sent_count}")
 
 
 if __name__ == "__main__":
-    run()
+    try:
+        run()
+    except Exception as e:
+        print(f"[main] fatal error: {e}")
+        sys.exit(1)
