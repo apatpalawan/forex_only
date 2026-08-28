@@ -70,6 +70,20 @@ def test_uptrend_triggers():
     zone_time = m15.index[-1]
     zone_high = float(m15["High"].iloc[-1])
 
+    # ต่อแท่ง D1/H1/M15 ท้ายสุดอีก 1 แท่ง (ยังไม่ปิด) เพื่อจำลองว่า evaluate_symbol
+    # จะตัดมันทิ้งเสมอ - แท่งที่ตั้งใจให้ trigger (ด้านบน) ต้องกลายเป็น "แท่งปิดล่าสุด" แทน
+    def _append_unclosed(df, freq):
+        extra = pd.DataFrame({
+            "Open": [df["Close"].iloc[-1]], "High": [df["Close"].iloc[-1] + 0.0001],
+            "Low": [df["Close"].iloc[-1] - 0.0001], "Close": [df["Close"].iloc[-1]],
+            "Volume": [500],
+        }, index=[df.index[-1] + pd.Timedelta(freq)])
+        return pd.concat([df, extra])
+
+    df_d1 = _append_unclosed(df_d1, "1D")
+    h1 = _append_unclosed(h1, "1h")
+    m15 = _append_unclosed(m15, "15min")
+
     # M1: หลังโซนแล้วมีแท่งทะลุ high จริง
     m1_n = 20
     m1 = pd.DataFrame({
