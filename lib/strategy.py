@@ -3,11 +3,22 @@ Strategy - D1 (ทิศทาง) -> H1 (ความแข็งแรง) -> 
 
 M1 ไม่มี indicator เพิ่มเติมของตัวเอง - ใช้แค่ยืนยันว่าแท่ง M1 "ปิด" ทะลุ high/low
 ของแท่งกลับตัวที่เจอบน M15 ตามหลักการที่ตกลงกันไว้ (กัน noise/repaint จาก timeframe เล็ก)
+
+ทุก timeframe (D1/H1/M15/M1) ตัดแท่งสุดท้ายที่ "ยังไม่ปิด" ออกก่อนคำนวณ indicator เสมอ
+(yfinance คืนแท่งปัจจุบันที่กำลังก่อตัวมาด้วย ถ้าไม่ตัดออก ค่า EMA/MACD/ADX จะ repaint
+ได้ก่อนแท่งนั้นปิดจริง) - ดู drop_unclosed_candle()
 """
 
 import pandas as pd
 import config
 from lib.indicators import ema, macd, atr, adx_di
+
+
+def drop_unclosed_candle(df: pd.DataFrame) -> pd.DataFrame:
+    """ตัดแท่งสุดท้ายออก (ถือว่ายังไม่ปิด/กำลังก่อตัว) เหลือเฉพาะแท่งที่ปิดแล้วจริง"""
+    if df is None or len(df) <= 1:
+        return df
+    return df.iloc[:-1]
 
 
 def d1_direction(df_d1: pd.DataFrame) -> str | None:
@@ -139,6 +150,14 @@ def evaluate_symbol(symbol: str, candles: dict):
     if any(df is None for df in (df_d1, df_h1, df_m15, df_m1)):
         return None
 
+    # ตัดแท่งสุดท้ายที่ยังไม่ปิดออกทุก timeframe ก่อนคำนวณอะไรทั้งสิ้น (กัน repaint)
+    df_d1 = drop_unclosed_candle(df_d1)
+    df_h1 = drop_unclosed_candle(df_h1)
+    df_m15 = drop_unclosed_candle(df_m15)
+    df_m1_closed = drop_unclosed_candle(df_m1)
+    if any(df is None or df.empty for df in (df_d1, df_h1, df_m15, df_m1_closed)):
+        return None
+
     direction = d1_direction(df_d1)
     if direction is None:
         return None
@@ -150,9 +169,6 @@ def evaluate_symbol(symbol: str, candles: dict):
     zone = find_m15_reversal_zone(df_m15, direction)
     if zone is None:
         return None
-
-    # ตัดแท่ง M1 สุดท้ายที่อาจยังไม่ปิดออก ใช้เฉพาะแท่งที่ปิดแล้วยืนยัน
-    df_m1_closed = df_m1.iloc[:-1] if len(df_m1) > 1 else df_m1
 
     if m1_range_spike(df_m1_closed):
         return None  # แท่ง M1 ล่าสุดกว้างผิดปกติ - ข้าม กันสัญญาณหลอกช่วง spike
