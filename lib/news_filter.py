@@ -61,8 +61,8 @@ def is_blocked_by_news(symbol: str) -> bool:
 
 
 def _symbol_to_currencies(symbol: str):
-    base = symbol.replace("=X", "").upper()
-    if base == "XAUUSD":
+    base = symbol.replace("=X", "").replace("=F", "").upper()
+    if base in ("XAUUSD", "GC"):  # ทองคำ (ทั้ง FX cross เดิม และ futures ticker ใหม่) ผูกกับข่าว USD
         return {"USD"}
     if len(base) == 6:
         return {base[:3], base[3:]}

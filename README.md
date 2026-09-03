@@ -1,61 +1,71 @@
-# M1 Multi-Timeframe Trigger Bot (XAUUSD only) → แจ้งเตือนเข้า LINE OA
+# Pure M1 Bot → แจ้งเตือนเข้า LINE OA
 
-บอทสแกน **ทองคำ (XAUUSD) เท่านั้น** ผ่าน 4 ชั้น timeframe ก่อนส่งสัญญาณเข้า LINE:
+บอทดู **timeframe M1 อย่างเดียว** ไม่สนใจ D1/H1/M15 อีกต่อไป (เปลี่ยนจากเวอร์ชันก่อนหน้าที่ไล่ยืนยันหลาย timeframe)
 
-1. **D1** — หาทิศทางหลัก จาก EMA20/EMA50 + MACD ต้องสอดคล้องกันทั้งคู่ (`up`/`down`) ไม่งั้นข้าม
-2. **H1** — ยืนยันความแข็งแรงของเทรนด์: ADX > `ADX_MIN` และต้องเพิ่มขึ้นจากแท่งก่อนหน้า, DI+/DI- ต้องห่างกันพอ (`DI_GAP_MIN`) และสอดคล้องทิศทาง D1, ATR ต้องขยายตัว (`ATR_RATIO_MIN`)
-3. **M15** — หาแท่งที่ราคาย่อเข้าใกล้ EMA20(M15) แล้วเกิดแท่งกลับตัว (reversal) ตามทิศทาง D1/H1 → กำหนดเป็น "โซน" (high/low)
-4. **M1** — รอแท่ง M1 **ที่ปิดแล้ว** ทะลุ high/low ของโซน M15 นั้นภายใน `M1_CONFIRM_WINDOW_BARS` แท่ง → ถือเป็น trigger เข้าไม้
+ส่งสัญญาณ **1 แบบเท่านั้น** และต้องเกิด **ทั้ง 2 เงื่อนไขพร้อมกัน** บนแท่ง M1 ที่ปิดล่าสุดแท่งเดียวกัน (AND ไม่ใช่ OR):
 
-**ทุก timeframe (D1/H1/M15/M1) จะตัดแท่งสุดท้ายที่ยังไม่ปิดออกก่อนคำนวณเสมอ** (`drop_unclosed_candle` ใน `lib/strategy.py`) กัน repaint ระหว่างแท่งกำลังก่อตัว
+1. **Sideway breakout + Volume momentum** — ราคาสร้างกรอบแคบ (sideway) มาสักพัก แล้วแท่งล่าสุดปิดทะลุกรอบ พร้อม Volume พุ่งขึ้นเทียบค่าเฉลี่ย
+2. **EMA50 ตัด EMA100** — เส้น EMA50 ตัดขึ้น/ลงผ่านเส้น EMA100 บนแท่งเดียวกันนั้นพอดี
 
-ผ่านครบทั้ง 4 ชั้น → ส่งเข้า LINE OA (ข้อความสั้น ประหยัด quota) พร้อม dedupe กันแจ้งซ้ำแท่งเดิม และจำกัดสูงสุด `MAX_ALERTS_PER_SYMBOL_PER_DAY` ครั้ง/วัน
+ทั้งสองเงื่อนไขต้องไปทิศทางเดียวกันด้วย (breakout ขึ้น + EMA ตัดขึ้น = BUY, breakout ลง + EMA ตัดลง = SELL) ทำทั้งขาขึ้นและขาลง ข้อความ LINE สั้น ประหยัดโควตา
 
 ## โครงสร้างไฟล์
 
 ```
-config.py                 พารามิเตอร์ทั้งหมด (symbol, threshold แต่ละชั้น, session, LINE env vars)
-main.py                   orchestrate: เช็ค session -> ดึงราคา -> ประเมินสัญญาณ -> ส่ง LINE -> เซฟ state
-lib/data_fetcher.py        ดึง D1/H1/M15/M1 candles จาก yfinance (curl_cffi impersonation + jitter delay กัน rate-limit)
-lib/indicators.py          EMA / MACD / ATR / ADX+DI (คำนวณด้วย pandas ล้วน)
-lib/strategy.py            logic หลัก D1->H1->M15->M1 รวมถึงตัด unclosed candle ทุก timeframe
-lib/session_filter.py      เทรดเฉพาะช่วง London/NY overlap (07-16 UTC ตาม config)
-lib/news_filter.py         (ปิดไว้ default) เชื่อม Forex Factory calendar ระงับแจ้งเตือนใกล้ข่าว High impact
-lib/state_manager.py       อ่าน/บันทึก state.json (กันแจ้งซ้ำแท่งเดิม + จำกัดจำนวนแจ้งเตือน/วัน)
-lib/line_notify.py         format ข้อความสั้น + push เข้า LINE Messaging API
-state.json                 เก็บ trigger_time ล่าสุดต่อ symbol (bot commit กลับ repo เองอัตโนมัติ)
-test_local.py              ทดสอบ logic ด้วยข้อมูลจำลอง (ไม่ต่อ network) - รันก่อน deploy ทุกครั้ง
-.github/workflows/m1_trigger.yml   cron ทุก 5 นาที + commit state.json กลับ
+config.py               พารามิเตอร์ทั้งหมด (symbol, threshold ต่างๆ) — ปรับได้ตรงนี้
+lib/data_fetcher.py     ดึงราคา M1 จาก Yahoo Finance (yfinance)
+lib/indicators.py       EMA / ATR (คำนวณด้วย pandas ล้วน)
+lib/strategy.py         logic: หากรอบ sideway, เช็ค breakout, เช็ค volume momentum, เช็ค EMA cross, รวมเงื่อนไข AND
+lib/session_filter.py   จำกัดช่วงเวลาเทรด (London/NY overlap)
+lib/news_filter.py      (ปิดไว้โดย default) ระงับแจ้งเตือนช่วงข่าวแรงถ้าเปิดใช้
+lib/state_manager.py    อ่าน/บันทึก state.json กันแจ้งเตือนซ้ำแท่งเดิม
+lib/line_notify.py      ส่งข้อความเข้า LINE (รูปแบบสั้น)
+main.py                 สแกนหลัก รันตาม cron ใน .github/workflows/m1_trigger.yml (ทุก 5 นาที)
+state.json              เก็บสถานะแจ้งเตือน (bot commit กลับ repo เองอัตโนมัติ)
+test_local.py           ทดสอบ logic แบบ offline (ไม่ต้องต่อ internet)
 ```
 
-## ตั้งค่า GitHub Secrets (ใช้ของเดิมที่มีอยู่แล้วได้เลย)
+## ⚠️ ข้อควรระวังสำคัญเรื่อง Volume
 
-- `LINE_CHANNEL_ACCESS_TOKEN`
-- `LINE_TARGET_IDS` (comma-separated user/group ids)
+บอทนี้ **ต้องมี Volume จริง** ถึงจะทำงานได้ เพราะเงื่อนไข "volume momentum" เป็นส่วนหนึ่งของ AND ที่บังคับ
+คู่เงิน Forex ส่วนใหญ่บน Yahoo Finance (เช่น `EURUSD=X`, `XAUUSD=X`) เป็น **synthetic FX cross** ที่ไม่มีข้อมูล
+Volume จริง (มักเป็น 0 ตลอด) เพราะตลาด Forex เป็น OTC ไม่มีการรายงาน volume รวมศูนย์
 
-## ทดสอบก่อนใช้จริง (ทดลองก่อนรันจริงเสมอ)
+`config.py` จึงตั้ง default เป็น **`GC=F`** (สัญญาซื้อขายล่วงหน้าทองคำ) แทน `XAUUSD=X` เดิม เพราะมี Volume จริง
+ถ้าจะเพิ่ม/เปลี่ยน symbol อื่น ให้ทดสอบก่อนว่า Volume ของ ticker นั้นบน yfinance ไม่ใช่ 0 ตลอด ไม่งั้นสัญญาณจะไม่มีวันเกิดขึ้นเลย
+
+## ทำไม 2 เงื่อนไขต้องเกิดพร้อมกัน (AND)
+
+ตามที่ตกลงกันไว้ — สัญญาณ breakout เดี่ยว ๆ หรือ EMA cross เดี่ยว ๆ อาจเป็น noise ได้ง่ายบน timeframe เล็กอย่าง M1
+การบังคับให้ทั้งสองเงื่อนไข (โครงสร้างราคา + โมเมนตัม + trend confirmation จาก EMA) เกิดพร้อมกันบนแท่งเดียวกัน
+ช่วยกรองสัญญาณหลอกได้มากกว่า แลกกับความถี่สัญญาณที่น้อยลง
+
+## ขั้นตอนติดตั้ง / ทดสอบ
 
 ```
 pip install -r requirements.txt
-python test_local.py          # จำลอง logic ด้วยข้อมูลปลอม ไม่ต่อ network เลย
 export LINE_CHANNEL_ACCESS_TOKEN="your-token"
-export LINE_TARGET_IDS="your-line-id"
-python main.py                 # รันจริงครั้งเดียว ต่อ yfinance/LINE จริง
+export LINE_TARGET_IDS="your-user-id"
+python test_local.py     # ทดสอบ logic แบบ offline ก่อนเสมอ
+python main.py            # รันจริง 1 รอบ (ต้องต่อ internet)
 ```
 
-หลัง push ขึ้น GitHub แนะนำกด **Run workflow** (workflow_dispatch) ทดสอบยิงจริงก่อนปล่อยรันตาม schedule — เช็ค log ว่าไม่ error และ `state.json` ถูก commit กลับเข้า repo หลังรันเสร็จ
+ถ้าไม่ตั้ง `LINE_CHANNEL_ACCESS_TOKEN`/`LINE_TARGET_IDS` บอทจะข้ามการส่งจริงและ print แจ้งเหตุผลออกทาง console แทน
 
-## ปรับพารามิเตอร์ได้ที่ `config.py`
+## ปรับพารามิเตอร์
 
-- `EMA_FAST/EMA_SLOW`, `MACD_*` — ความไวของทิศทาง D1
-- `ADX_MIN`, `ADX_MUST_RISE`, `DI_GAP_MIN`, `ATR_RATIO_MIN` — ความเข้มงวดของการยืนยัน H1
-- `PULLBACK_EMA_TOLERANCE_PCT`, `M15_LOOKBACK_BARS` — ความใกล้ EMA20 และช่วงมองย้อนหลังของ M15
-- `M1_CONFIRM_WINDOW_BARS` — รอ breakout บน M1 ได้กี่แท่งก่อนโซนหมดอายุ
-- `SESSION_START_UTC/SESSION_END_UTC` — ช่วงเวลาที่ยอมให้เทรด
-- `MAX_ALERTS_PER_SYMBOL_PER_DAY` — เพดานแจ้งเตือน/วัน กัน over-alert
+เปิด `config.py`:
+- `SYMBOLS` — รายชื่อ symbol ที่สแกน (ต้องมี Volume จริงตามที่อธิบายด้านบน)
+- `M1_SIDEWAY_LOOKBACK`, `M1_SIDEWAY_MAX_RANGE_ATR_RATIO` — ความ "แคบ" ของกรอบ sideway ที่ต้องการ
+- `M1_BREAKOUT_BUFFER_PCT` — กัน false breakout (ยิ่งสูงยิ่งรอ confirm มากขึ้น แต่เข้าช้าลง)
+- `M1_VOLUME_LOOKBACK`, `M1_VOLUME_RATIO_MIN` — เกณฑ์ volume momentum
+- `M1_EMA_FAST` / `M1_EMA_SLOW` — ค่าเริ่มต้น 50/100 ตามที่ตกลงกันไว้
+- `MAX_ALERTS_PER_SYMBOL_PER_DAY` — เพดานแจ้งเตือนต่อ symbol ต่อวัน
 
 ## ข้อจำกัดที่ควรรู้
 
-1. ข้อมูลจาก yfinance ไม่ใช่ real-time tick data จริง อาจมี delay หรือช่วงข้อมูลขาดหาย
-2. GitHub Actions cron ทุก 5 นาทีจริง ๆ อาจดีเลย์เพิ่ม 2-10 นาทีตามคิว โดยเฉพาะช่วงคนใช้เยอะ
-3. เครื่องมือช่วยหาโอกาส ไม่ใช่คำแนะนำการลงทุน ควรใช้ร่วมกับ risk management ของตัวเอง
+1. **GitHub Actions cron ต่ำสุดจริงคือ ~5 นาที** (และอาจดีเลย์เพิ่มอีก 2-10 นาที) ไม่ใช่ 1 นาทีเป๊ะ ดังนั้นแท่ง M1
+ที่ตรวจพบสัญญาณอาจปิดไปแล้วสักพักก่อนบอทจะรันรอบถัดไปมาเจอ — เหมาะกับการ "แจ้งเตือนโมเมนตัม" มากกว่าการเข้าไม้ทันทีแบบ HFT
+2. **ข้อมูลจาก yfinance ไม่ใช่ real-time tick data จริง** อาจมี delay หรือช่วงข้อมูลขาดหาย
+3. **นี่คือเครื่องมือช่วยหาโอกาส ไม่ใช่คำแนะนำการลงทุน** สัญญาณหลอกเกิดขึ้นได้เสมอแม้เงื่อนไขจะเข้มกว่าเดิม
+ควรใช้ร่วมกับการบริหารความเสี่ยงของคุณเอง (stop loss, money management)

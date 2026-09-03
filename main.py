@@ -1,13 +1,14 @@
 """
-M1 Multi-Timeframe Trigger Bot
-D1 (ทิศทาง) -> H1 (ความแข็งแรง: ADX/DI/ATR) -> M15 (โซน pullback+reversal) -> M1 (trigger ยืนยันแท่งปิด)
+Pure M1 Bot
+สัญญาณเดียว: sideway breakout + volume momentum "และ" EMA50 ตัด EMA100
+ต้องเกิดพร้อมกันบนแท่ง M1 เดียวกัน (ไม่สนใจ D1/H1/M15 อีกต่อไป)
 
-รันไฟล์นี้เพื่อสแกนทุก symbol ใน config.SYMBOLS แล้วส่ง LINE เฉพาะเมื่อเจอ trigger จริงเท่านั้น
+รันไฟล์นี้เพื่อสแกนทุก symbol ใน config.SYMBOLS แล้วส่ง LINE เฉพาะเมื่อเจอสัญญาณจริงเท่านั้น
 """
 
 import sys
 import config
-from lib.data_fetcher import fetch_all_timeframes
+from lib.data_fetcher import fetch_m1
 from lib.strategy import evaluate_symbol
 from lib.session_filter import in_trading_session
 from lib.news_filter import is_blocked_by_news
@@ -28,8 +29,8 @@ def run():
             if alerts_today(state, symbol) >= config.MAX_ALERTS_PER_SYMBOL_PER_DAY:
                 continue
 
-            candles = fetch_all_timeframes(symbol)
-            signal = evaluate_symbol(symbol, candles)
+            df_m1 = fetch_m1(symbol)
+            signal = evaluate_symbol(symbol, df_m1)
             if signal is None:
                 continue
 
