@@ -9,12 +9,15 @@ LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
 
 
 def format_m1_alert(signal: dict) -> str:
-    """ข้อความสั้น ประหยัดความยาว - สัญญาณเดียวที่เกิดจาก breakout+volume และ EMA50x100 พร้อมกัน"""
+    """
+    ข้อความสั้น ประหยัดความยาว - สัญญาณเดียวที่ผ่านครบทุกเงื่อนไข AND แล้ว
+    (breakout+vol, EMA50x100, EMA9x20 pullback, MACD, RSI, ADX+DI)
+    """
     arrow = "⬆️BUY" if signal["direction"] == "up" else "⬇️SELL"
     sym = signal["symbol"].replace("=X", "").replace("=F", "")
     return (
         f"🎯{sym} {arrow} @ {signal['trigger_price']}\n"
-        f"Breakout+Vol+EMA50x100"
+        f"BO+EMA50x100+Pullback9x20+MACD+RSI+ADX"
     )
 
 

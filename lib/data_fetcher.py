@@ -18,7 +18,9 @@ MAX_RETRIES = 3
 BASE_DELAY = 1.0
 
 # ต้องมีแท่งพอสำหรับ EMA100 + lookback ต่าง ๆ (M1_EMA_SLOW=100 คือค่าที่มากสุด)
-MIN_CANDLES_REQUIRED = 130
+# ต้องมีแท่งพอสำหรับ EMA100 (M1_EMA_SLOW) + กรอบค้นหาย้อนหลัง
+# (M1_PULLBACK_LOOKBACK_BARS) + sideway lookback + buffer กันขอบเขตข้อมูล
+MIN_CANDLES_REQUIRED = 200
 
 
 def fetch_m1(symbol: str) -> pd.DataFrame | None:

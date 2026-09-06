@@ -29,6 +29,21 @@ def atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
     return tr.ewm(alpha=1 / period, adjust=False).mean()
 
 
+def rsi(close: pd.Series, period: int = 14) -> pd.Series:
+    delta = close.diff()
+    gain = delta.clip(lower=0)
+    loss = -delta.clip(upper=0)
+    avg_gain = gain.ewm(alpha=1 / period, adjust=False).mean()
+    avg_loss = loss.ewm(alpha=1 / period, adjust=False).mean()
+    rs = avg_gain / avg_loss.replace(0, np.nan)
+    result = 100 - (100 / (1 + rs))
+    # avg_loss=0 แต่ avg_gain>0 (ขึ้นล้วน ไม่มีลงเลยในช่วงนั้น) -> RSI ควรเป็น
+    # 100 (สุดโต่งฝั่งขึ้น) ไม่ใช่ NaN/50 - fillna(50) เอาไว้จับเฉพาะกรณีราคา
+    # นิ่งสนิทจริง ๆ (avg_gain=0 และ avg_loss=0 พร้อมกัน) เท่านั้น
+    result = result.where(~((avg_loss == 0) & (avg_gain > 0)), 100.0)
+    return result.fillna(50)
+
+
 def adx_di(df: pd.DataFrame, period: int = 14):
     """คืน (ADX, DI+, DI-) เป็น pd.Series ทั้งสามตัว"""
     high, low, close = df["High"], df["Low"], df["Close"]

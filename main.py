@@ -1,12 +1,14 @@
 """
 Pure M1 Bot
-สัญญาณเดียว: sideway breakout + volume momentum "และ" EMA50 ตัด EMA100
-ต้องเกิดพร้อมกันบนแท่ง M1 เดียวกัน (ไม่สนใจ D1/H1/M15 อีกต่อไป)
+สัญญาณเดียว ต้องผ่านครบทุกเงื่อนไข (AND เข้มสุด): sideway breakout+volume,
+EMA50x100 cross, EMA9x20 pullback confirmation, MACD, RSI, ADX+DI
+ไปทิศทางเดียวกันทั้งหมด (ไม่สนใจ D1/H1/M15 อีกต่อไป)
 
 รันไฟล์นี้เพื่อสแกนทุก symbol ใน config.SYMBOLS แล้วส่ง LINE เฉพาะเมื่อเจอสัญญาณจริงเท่านั้น
 """
 
 import sys
+import time
 import config
 from lib.data_fetcher import fetch_m1
 from lib.strategy import evaluate_symbol
@@ -14,6 +16,11 @@ from lib.session_filter import in_trading_session
 from lib.news_filter import is_blocked_by_news
 from lib.state_manager import load_state, save_state, already_alerted, alerts_today, record_alert
 from lib.line_notify import format_m1_alert, send_line_message
+
+# หน่วงเวลาสั้น ๆ ระหว่าง symbol กันโดน Yahoo Finance rate-limit (สำคัญขึ้น
+# มากตอนนี้ที่ลิสต์ symbol ขยายจาก 1 ตัว เป็น ~29 ตัว - ปัญหานี้เคยเจอมา
+# แล้วจริงในบอทพี่น้องกัน apatpalawan/forex-radar-v8)
+INTER_SYMBOL_DELAY_SEC = 0.5
 
 
 def run():
@@ -30,6 +37,8 @@ def run():
                 continue
 
             df_m1 = fetch_m1(symbol)
+            time.sleep(INTER_SYMBOL_DELAY_SEC)
+
             signal = evaluate_symbol(symbol, df_m1)
             if signal is None:
                 continue
