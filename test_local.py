@@ -1,239 +1,184 @@
 """
-Test local - ทดสอบ logic ของ Pure M1 Bot แบบ offline ล้วน ๆ (ไม่ต้องต่อ internet)
-ใช้ข้อมูลสังเคราะห์ (synthetic OHLCV) แทนการดึงจาก yfinance จริง
-
-แนวทางทดสอบ:
-1. ทดสอบแต่ละ indicator/helper function แยกด้วยข้อมูลจริงที่คำนวณตรง ๆ
-   (rsi, macd confirm, adx confirm, sideway/breakout, ema cross ค้นย้อนหลัง)
-2. ทดสอบ evaluate_symbol() ที่เป็นตัวรวมเงื่อนไข AND ทั้ง 6 ข้อ โดยสลับ
-   helper function ภายในเป็นค่าจำลอง (monkeypatch) แทนการพยายามสร้างราคา
-   สังเคราะห์ให้ MACD/RSI/ADX/EMA ทั้งหมดตรงกันพอดีเป๊ะ ๆ พร้อมกัน ซึ่งเปราะ
-   บางเกินไปสำหรับเทสต์ - วิธีนี้ยืนยันได้ตรง ๆ ว่า "ตรรกะ AND" ต่อ/ตัดถูกต้อง
-   โดยไม่ขึ้นกับความบังเอิญของข้อมูลสังเคราะห์
-
-วิธีรัน:
-    python test_local.py
+ทดสอบ logic ทั้งหมดแบบ offline ด้วยข้อมูลสังเคราะห์ (ไม่ต้องต่อเน็ต ไม่ต้องมี LINE token)
+รัน: python test_local.py
 """
-
 import numpy as np
 import pandas as pd
 
-import config
-import lib.strategy as strategy
-from lib.indicators import rsi
-from lib.strategy import (
-    drop_unclosed_candle,
-    _sideway_zone_ending_at,
-    _breakout_direction_at,
-    find_recent_breakout,
-    _ema_cross_direction_at,
-    find_recent_ema_cross,
-    _macd_confirms,
-    _rsi_confirms,
-    _adx_confirms,
-    evaluate_symbol,
-)
+from lib import indicators as ind
+from lib import strategy, state_manager
 
-PASS = 0
-FAIL = 0
+passed = 0
+failed = 0
 
 
 def check(name, condition):
-    global PASS, FAIL
+    global passed, failed
     if condition:
-        PASS += 1
-        print(f"[PASS] {name}")
+        passed += 1
+        print(f"  [PASS] {name}")
     else:
-        FAIL += 1
-        print(f"[FAIL] {name}")
+        failed += 1
+        print(f"  [FAIL] {name}")
 
 
-def make_df(closes, opens=None, highs=None, lows=None, volumes=None):
+class Cfg:
+    EMA_TREND_FAST = 100
+    EMA_TREND_SLOW = 300
+    TREND_CROSS_LOOKBACK_BARS = 300
+    EMA_SIGNAL_FAST = 9
+    EMA_SIGNAL_SLOW = 25
+    MACD_FAST = 12
+    MACD_SLOW = 26
+    MACD_SIGNAL = 9
+    RSI_PERIOD = 14
+    RSI_MID = 50
+    ADX_PERIOD = 14
+    ADX_MIN = 20
+
+
+def make_df_from_closes(closes, noise=0.0, seed=0):
+    rng = np.random.default_rng(seed)
+    closes = np.array(closes, dtype=float)
     n = len(closes)
-    opens = opens or closes
-    highs = highs or [max(o, c) + 0.01 for o, c in zip(opens, closes)]
-    lows = lows or [min(o, c) - 0.01 for o, c in zip(opens, closes)]
-    volumes = volumes or [100] * n
+    high = closes + np.abs(rng.normal(0, noise, n)) + 0.001
+    low = closes - np.abs(rng.normal(0, noise, n)) - 0.001
+    open_ = closes + rng.normal(0, noise, n) * 0.3
     idx = pd.date_range("2026-01-01", periods=n, freq="1min")
     return pd.DataFrame(
-        {"Open": opens, "High": highs, "Low": lows, "Close": closes, "Volume": volumes},
+        {"Open": open_, "High": high, "Low": low, "Close": closes, "Volume": 100},
         index=idx,
     )
 
 
-# ==========================================================
-# drop_unclosed_candle
-# ==========================================================
-df_5 = make_df([1, 2, 3, 4, 5])
-check("drop_unclosed_candle ตัดแท่งสุดท้ายออก 1 แท่ง", len(drop_unclosed_candle(df_5)) == 4)
-check("drop_unclosed_candle: df สั้นเกินไป (<=1 แท่ง) คืนค่าเดิม", len(drop_unclosed_candle(make_df([1]))) == 1)
-
-# ==========================================================
-# rsi()
-# ==========================================================
-uptrend = pd.Series(np.linspace(100, 150, 60))
-downtrend = pd.Series(np.linspace(150, 100, 60))
-flat = pd.Series([100.0] * 60)
-
-check("rsi: ขาขึ้นล้วน -> RSI สูง (>70)", rsi(uptrend, 14).iloc[-1] > 70)
-check("rsi: ขาลงล้วน -> RSI ต่ำ (<30)", rsi(downtrend, 14).iloc[-1] < 30)
-check("rsi: ราคานิ่ง -> RSI ~50 (ไม่ crash แม้ avg_loss=0)", abs(rsi(flat, 14).iloc[-1] - 50) < 1)
-
-# ==========================================================
-# _sideway_zone_ending_at / _breakout_direction_at
-# ==========================================================
-tight_closes = [100.0 + (0.1 if i % 2 == 0 else -0.1) for i in range(25)]
-df_tight = make_df(tight_closes)
-zone = _sideway_zone_ending_at(df_tight, 20)  # ใช้แท่ง 0-19 หา zone
-check("_sideway_zone_ending_at: กรอบแคบ -> เจอ zone", zone is not None)
-
-trend_closes = list(np.linspace(100.0, 130.0, 25))
-df_trend = make_df(trend_closes)
-check("_sideway_zone_ending_at: เทรนด์ทางเดียวยาว (ไม่ใช่กรอบ) -> None",
-      _sideway_zone_ending_at(df_trend, 20) is None)
-
-check("_sideway_zone_ending_at: ข้อมูลไม่พอ -> None", _sideway_zone_ending_at(make_df([100.0] * 5), 20) is None)
-
-zone_fixed = {"high": 101.0, "low": 99.0}
-df_break_up = make_df([100.0] * 24 + [101.5])
-check("_breakout_direction_at: ทะลุขึ้น -> 'up'", _breakout_direction_at(df_break_up, 24, zone_fixed) == "up")
-
-df_break_down = make_df([100.0] * 24 + [98.5])
-check("_breakout_direction_at: ทะลุลง -> 'down'", _breakout_direction_at(df_break_down, 24, zone_fixed) == "down")
-
-df_no_break = make_df([100.0] * 25)
-check("_breakout_direction_at: ยังอยู่ในกรอบ -> None", _breakout_direction_at(df_no_break, 24, zone_fixed) is None)
-
-# find_recent_breakout: breakout เกิดที่แท่งกลาง ๆ ของกรอบค้นหา ต้องเจอย้อนหลังได้
-# (ไม่เช็ค volume แล้ว - ใช้ MACD/RSI/ADX ยืนยันโมเมนตัมแทนในเลเยอร์อื่น)
-closes_with_breakout_mid = [100.0] * 20 + [100.0 + (0.05 if i % 2 == 0 else -0.05) for i in range(20)] + [102.0] + [102.0] * 9
-df_recent_breakout = make_df(closes_with_breakout_mid)
-found_pos = find_recent_breakout(df_recent_breakout, "up", upto_pos=len(df_recent_breakout) - 1, lookback_bars=15)
-check("find_recent_breakout: เจอ breakout ย้อนหลังในกรอบเวลาได้", found_pos == 40)
-
-check("find_recent_breakout: ค้นในกรอบที่ไม่ครอบคลุม breakout -> None",
-      find_recent_breakout(df_recent_breakout, "up", upto_pos=len(df_recent_breakout) - 1, lookback_bars=5) is None)
-
-# ==========================================================
-# _ema_cross_direction_at / find_recent_ema_cross
-# ==========================================================
-n = 150
-downtrend_long = list(np.linspace(102, 100, 40)) + [100.0 + (0.01 if i % 2 == 0 else -0.01) for i in range(20)] + [103.0]
-df_cross = make_df(downtrend_long)
-pos_last = len(df_cross) - 1
-cross_at_last = _ema_cross_direction_at(df_cross, 10, 30, pos_last)
-check("_ema_cross_direction_at: จุดตัดที่ตำแหน่งท้ายสุด -> 'up'", cross_at_last == "up")
-check("_ema_cross_direction_at: ตำแหน่งก่อนหน้า ยังไม่ตัด -> None",
-      _ema_cross_direction_at(df_cross, 10, 30, pos_last - 5) is None)
-
-found = find_recent_ema_cross(df_cross, 10, 30, "up", upto_pos=pos_last, lookback_bars=10)
-check("find_recent_ema_cross: ค้นย้อนหลังเจอจุดตัดที่ถูกต้อง", found == pos_last)
-check("find_recent_ema_cross: ทิศทางผิด -> None",
-      find_recent_ema_cross(df_cross, 10, 30, "down", upto_pos=pos_last, lookback_bars=10) is None)
-
-# ==========================================================
-# _macd_confirms / _rsi_confirms / _adx_confirms (ใช้ config จริง)
-# ==========================================================
-strong_up = make_df(list(np.linspace(100, 160, 120)))
-strong_down = make_df(list(np.linspace(160, 100, 120)))
-pos_up = len(strong_up) - 1
-pos_down = len(strong_down) - 1
-
-check("_macd_confirms: เทรนด์ขึ้นแรง -> True สำหรับ 'up'", _macd_confirms(strong_up, pos_up, "up") is True)
-check("_macd_confirms: เทรนด์ขึ้นแรง -> False สำหรับ 'down'", _macd_confirms(strong_up, pos_up, "down") is False)
-check("_rsi_confirms: เทรนด์ขึ้นแรง -> True สำหรับ 'up'", _rsi_confirms(strong_up, pos_up, "up") is True)
-check("_rsi_confirms: เทรนด์ลงแรง -> True สำหรับ 'down'", _rsi_confirms(strong_down, pos_down, "down") is True)
-check("_adx_confirms: เทรนด์ขึ้นแรงต่อเนื่อง -> True สำหรับ 'up'", _adx_confirms(strong_up, pos_up, "up") is True)
-check("_adx_confirms: เทรนด์ขึ้นแรง แต่เช็คทิศ 'down' -> False", _adx_confirms(strong_up, pos_up, "down") is False)
-
-flat_df_150 = make_df([100.0] * 150)
-pos_flat = len(flat_df_150) - 1
-check("_adx_confirms: ราคานิ่งสนิท (ไม่มี trend) -> False", _adx_confirms(flat_df_150, pos_flat, "up") is False)
-
-# ==========================================================
-# evaluate_symbol - ตรรกะ AND ทั้ง 6 เงื่อนไข (monkeypatch helper แต่ละตัว
-# เพื่อทดสอบการต่อ/ตัดของ evaluate_symbol โดยตรง ไม่ขึ้นกับข้อมูลสังเคราะห์)
-# ==========================================================
-_dummy_df = make_df([100.0] * (config.M1_EMA_SLOW + config.M1_PULLBACK_LOOKBACK_BARS + 10))
-
-# เก็บของจริงไว้ก่อน แล้วค่อย restore ท้ายสุด
-_orig = {
-    "_ema_cross_direction_at": strategy._ema_cross_direction_at,
-    "find_recent_ema_cross": strategy.find_recent_ema_cross,
-    "find_recent_breakout": strategy.find_recent_breakout,
-    "_macd_confirms": strategy._macd_confirms,
-    "_rsi_confirms": strategy._rsi_confirms,
-    "_adx_confirms": strategy._adx_confirms,
-}
+def uptrend_series(n, start=100.0, drift=0.02, noise=0.05, seed=1):
+    rng = np.random.default_rng(seed)
+    steps = drift + rng.normal(0, noise, n)
+    return start + np.cumsum(steps)
 
 
-def patch_all(trigger_dir="up", main_ema_found=True, breakout_found=True,
-              macd_ok=True, rsi_ok=True, adx_ok=True):
-    strategy._ema_cross_direction_at = lambda df, f, s, pos: trigger_dir
-    strategy.find_recent_ema_cross = lambda df, f, s, d, upto_pos, lookback_bars: (0 if main_ema_found else None)
-    strategy.find_recent_breakout = lambda df, d, upto_pos, lookback_bars: (0 if breakout_found else None)
-    strategy._macd_confirms = lambda df, pos, d: macd_ok
-    strategy._rsi_confirms = lambda df, pos, d: rsi_ok
-    strategy._adx_confirms = lambda df, pos, d: adx_ok
+def downtrend_series(n, start=200.0, drift=-0.02, noise=0.05, seed=2):
+    rng = np.random.default_rng(seed)
+    steps = drift + rng.normal(0, noise, n)
+    return start + np.cumsum(steps)
 
 
-def restore_all():
-    for name, fn in _orig.items():
-        setattr(strategy, name, fn)
+def flat_series(n, level=100.0, noise=0.01, seed=3):
+    rng = np.random.default_rng(seed)
+    return level + rng.normal(0, noise, n)
 
 
-try:
-    # ทุกเงื่อนไขผ่านหมด -> ต้องได้สัญญาณ
-    patch_all()
-    sig = strategy.evaluate_symbol("TESTALL", _dummy_df)
-    check("evaluate_symbol: ผ่านครบทุกเงื่อนไข -> ได้สัญญาณ 'up'", sig is not None and sig["direction"] == "up")
+print("== 1. Indicator sanity ==")
 
-    # ไม่มี EMA9x20 cross เลย (trigger เอง None) -> ไม่มีสัญญาณ
-    patch_all()
-    strategy._ema_cross_direction_at = lambda df, f, s, pos: None
-    check("evaluate_symbol: ไม่มี EMA9x20 cross (trigger) -> None", strategy.evaluate_symbol("T", _dummy_df) is None)
+closes = pd.Series(uptrend_series(400, seed=10))
+e = ind.ema(closes, 20)
+check("ema: matches pandas ewm reference", np.isclose(e.iloc[-1], closes.ewm(span=20, adjust=False, min_periods=20).mean().iloc[-1]))
+check("ema: NaN before min_periods", pd.isna(e.iloc[5]))
 
-    # ไม่มี EMA50x100 cross ก่อนหน้า (ไม่ผ่าน pullback confirmation) -> ไม่มีสัญญาณ
-    patch_all(main_ema_found=False)
-    check("evaluate_symbol: ไม่มี EMA50x100 cross ย้อนหลัง -> None (AND ตก)",
-          strategy.evaluate_symbol("T", _dummy_df) is None)
+macd_line, macd_signal, hist = ind.macd(closes, 12, 26, 9)
+check("macd: hist == macd_line - signal_line", np.isclose(hist.iloc[-1], macd_line.iloc[-1] - macd_signal.iloc[-1]))
+check("macd: positive on strong uptrend", macd_line.iloc[-1] > 0)
 
-    # ไม่มี breakout ย้อนหลัง -> ไม่มีสัญญาณ
-    patch_all(breakout_found=False)
-    check("evaluate_symbol: ไม่มี breakout ย้อนหลัง -> None (AND ตก)",
-          strategy.evaluate_symbol("T", _dummy_df) is None)
+up_closes = pd.Series(uptrend_series(60, drift=0.5, noise=0.0, seed=11))
+r_up = ind.rsi(up_closes, 14)
+check("rsi: near 100 on pure monotonic uptrend (no down-ticks)", r_up.iloc[-1] > 95)
 
-    # MACD ไม่ยืนยัน -> ไม่มีสัญญาณ
-    patch_all(macd_ok=False)
-    check("evaluate_symbol: MACD ไม่ยืนยัน -> None (AND ตก)", strategy.evaluate_symbol("T", _dummy_df) is None)
+down_closes = pd.Series(downtrend_series(60, drift=-0.5, noise=0.0, seed=12))
+r_down = ind.rsi(down_closes, 14)
+check("rsi: near 0 on pure monotonic downtrend (no up-ticks)", r_down.iloc[-1] < 5)
 
-    # RSI ไม่ยืนยัน -> ไม่มีสัญญาณ
-    patch_all(rsi_ok=False)
-    check("evaluate_symbol: RSI ไม่ยืนยัน -> None (AND ตก)", strategy.evaluate_symbol("T", _dummy_df) is None)
+flat_closes = pd.Series([100.0] * 60)
+r_flat = ind.rsi(flat_closes, 14)
+check("rsi: 50 on perfectly flat series (no gain, no loss)", np.isclose(r_flat.iloc[-1], 50.0))
 
-    # ADX ไม่ยืนยัน (trend ไม่แรงพอ หรือทิศไม่ตรง) -> ไม่มีสัญญาณ
-    patch_all(adx_ok=False)
-    check("evaluate_symbol: ADX ไม่ยืนยัน -> None (AND ตก)", strategy.evaluate_symbol("T", _dummy_df) is None)
+df_up = make_df_from_closes(uptrend_series(200, drift=0.3, noise=0.1, seed=13), noise=0.05, seed=13)
+adx_up, pdi_up, mdi_up = ind.adx_di(df_up, 14)
+check("adx_di: +DI > -DI in clear uptrend", pdi_up.iloc[-1] > mdi_up.iloc[-1])
+check("adx_di: ADX rises above 20 in a clear trending move", adx_up.iloc[-1] > 20)
 
-    # ขาลงก็ต้องทำงานเหมือนกัน (symmetry)
-    patch_all(trigger_dir="down")
-    sig_down = strategy.evaluate_symbol("TESTDOWN", _dummy_df)
-    check("evaluate_symbol: ผ่านครบทุกเงื่อนไข ขาลง -> ได้สัญญาณ 'down'",
-          sig_down is not None and sig_down["direction"] == "down")
-
-    # df ว่าง/สั้นเกินไป -> ไม่ crash
-    check("evaluate_symbol: df None -> None ไม่ crash", strategy.evaluate_symbol("T", None) is None)
-    check("evaluate_symbol: df สั้นเกินไป -> None ไม่ crash", strategy.evaluate_symbol("T", make_df([100.0] * 10)) is None)
-
-finally:
-    restore_all()
+df_down = make_df_from_closes(downtrend_series(200, drift=-0.3, noise=0.1, seed=14), noise=0.05, seed=14)
+adx_down, pdi_down, mdi_down = ind.adx_di(df_down, 14)
+check("adx_di: -DI > +DI in clear downtrend", mdi_down.iloc[-1] > pdi_down.iloc[-1])
 
 
-print()
-print("=" * 40)
-print(f"RESULT: PASS {PASS} / FAIL {FAIL}")
-print("=" * 40)
+print("\n== 2. Trend cross detection (_trend_direction) ==")
 
-if FAIL > 0:
-    import sys
-    sys.exit(1)
+# สร้างราคา: 400 แท่งขาลงก่อน (EMA100 ต่ำกว่า EMA300) แล้วสลับเป็นขาขึ้นแรงๆ ต่ออีก 500 แท่ง
+# ให้เกิดจุดตัด EMA100 ขึ้นเหนือ EMA300 อย่างชัดเจนระหว่างทาง
+part1 = downtrend_series(400, start=200, drift=-0.05, noise=0.02, seed=20)
+part2 = uptrend_series(500, start=part1[-1], drift=0.15, noise=0.02, seed=21)
+closes_cross_up = pd.Series(np.concatenate([part1, part2]))
+
+ema100 = ind.ema(closes_cross_up, 100)
+ema300 = ind.ema(closes_cross_up, 300)
+# ใช้ lookback ที่กว้างพอจะครอบคลุมจุดตัดจริง (คร่าวๆ อยู่แถวบาร์ 400-500 นับจากต้น
+# หรือประมาณ 400-500 บาร์ก่อนบาร์สุดท้ายจากทั้งหมด 900 บาร์)
+trend, cross_idx = strategy._trend_direction(ema100, ema300, lookback=600)
+check("trend_direction: detects 'up' after a real EMA100x300 cross-up", trend == "up")
+check("trend_direction: cross_idx is not None when cross found within lookback", cross_idx is not None)
+
+part3 = uptrend_series(400, start=100, drift=0.05, noise=0.02, seed=22)
+part4 = downtrend_series(500, start=part3[-1], drift=-0.15, noise=0.02, seed=23)
+closes_cross_down = pd.Series(np.concatenate([part3, part4]))
+ema100d = ind.ema(closes_cross_down, 100)
+ema300d = ind.ema(closes_cross_down, 300)
+trend_d, cross_idx_d = strategy._trend_direction(ema100d, ema300d, lookback=300)
+check("trend_direction: detects 'down' after a real EMA100x300 cross-down", trend_d == "down")
+
+# ไม่มีจุดตัดในช่วง lookback -> fallback ใช้ทิศทางปัจจุบัน
+long_up = pd.Series(uptrend_series(1000, drift=0.05, noise=0.02, seed=24))
+ema100f = ind.ema(long_up, 100)
+ema300f = ind.ema(long_up, 300)
+trend_f, cross_idx_f = strategy._trend_direction(ema100f, ema300f, lookback=50)
+check("trend_direction: fallback to current relationship when no cross within lookback", trend_f == "up" and cross_idx_f is None)
+
+
+print("\n== 3. Full evaluate() — BUY scenario ==")
+# เทรนด์ขึ้นชัดเจนต่อเนื่องยาวพอ (EMA100>EMA300, EMA9>EMA25, RSI>50, MACD>signal, ADX/DI ฝั่งขึ้น)
+buy_closes = uptrend_series(900, start=100, drift=0.08, noise=0.04, seed=30)
+df_buy = make_df_from_closes(buy_closes, noise=0.03, seed=30)
+res_buy = strategy.evaluate(df_buy, Cfg)
+check("evaluate: BUY signal fires on strong sustained uptrend", res_buy["signal"] == "buy")
+check("evaluate: BUY details report trend=up", res_buy["details"].get("trend") == "up")
+
+print("\n== 4. Full evaluate() — SELL scenario ==")
+sell_closes = downtrend_series(900, start=200, drift=-0.08, noise=0.04, seed=31)
+df_sell = make_df_from_closes(sell_closes, noise=0.03, seed=31)
+res_sell = strategy.evaluate(df_sell, Cfg)
+check("evaluate: SELL signal fires on strong sustained downtrend", res_sell["signal"] == "sell")
+
+print("\n== 5. Full evaluate() — no signal scenarios ==")
+flat_closes_long = flat_series(900, level=100, noise=0.01, seed=32)
+df_flat = make_df_from_closes(flat_closes_long, noise=0.01, seed=32)
+res_flat = strategy.evaluate(df_flat, Cfg)
+check("evaluate: flat/sideway market -> no signal", res_flat["signal"] is None)
+
+df_short = make_df_from_closes(uptrend_series(50, seed=33), noise=0.02, seed=33)
+res_short = strategy.evaluate(df_short, Cfg)
+check("evaluate: not enough bars for EMA300 warm-up -> no signal (not_enough_data)", res_short["signal"] is None and res_short["reason"] == "not_enough_data")
+
+# เทรนด์ขึ้น แต่ EMA9/25 ยังไม่เรียงตัวตาม (จำลองโดยหักมุมราคาลงแรงช่วงท้ายชั่วครู่)
+mixed_up = uptrend_series(900, start=100, drift=0.08, noise=0.03, seed=34)
+mixed_up_tail_down = downtrend_series(15, start=mixed_up[-1], drift=-0.6, noise=0.02, seed=35)
+mixed_closes = np.concatenate([mixed_up, mixed_up_tail_down])
+df_mixed = make_df_from_closes(mixed_closes, noise=0.03, seed=34)
+res_mixed = strategy.evaluate(df_mixed, Cfg)
+check("evaluate: uptrend regime but EMA9 dipped below EMA25 -> no buy signal", res_mixed["signal"] != "buy")
+
+
+print("\n== 6. State manager (dedup logic) ==")
+state = {}
+check("should_alert: first buy signal -> alert", state_manager.should_alert(state, "EURUSD", "buy") is True)
+state_manager.update_state(state, "EURUSD", "buy")
+check("should_alert: same buy signal again -> no alert (dedup)", state_manager.should_alert(state, "EURUSD", "buy") is False)
+state_manager.update_state(state, "EURUSD", None)
+check("should_alert: signal drops to None -> no alert (None never alerts)", state_manager.should_alert(state, "EURUSD", None) is False)
+check("should_alert: buy comes back after None -> alert again", state_manager.should_alert(state, "EURUSD", "buy") is True)
+state_manager.update_state(state, "EURUSD", "buy")
+check("should_alert: flips from buy to sell -> alert", state_manager.should_alert(state, "EURUSD", "sell") is True)
+check("should_alert: brand-new symbol with no prior state -> alert on first signal", state_manager.should_alert(state, "GBPUSD", "sell") is True)
+
+
+print(f"\n{'='*40}\nTOTAL: {passed} passed, {failed} failed\n{'='*40}")
+if failed:
+    raise SystemExit(1)

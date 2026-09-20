@@ -1,247 +1,127 @@
 """
-Strategy - Pure M1 เท่านั้น ไม่สนใจ D1/H1/M15 อีกต่อไป
+กลยุทธ์ M1:
+  ขาขึ้น: EMA100 ตัด EMA300 ขึ้น (เกิดก่อนเสมอ, ใช้เป็นตัวกำหนดเทรนด์หลัก)
+          จากนั้น EMA9 ต้องเรียงตัวอยู่เหนือ EMA25 (เช็คสถานะปัจจุบัน)
+          ยืนยันด้วย MACD (macd line > signal line), RSI (>50), ADX/DI (ADX>=min และ +DI>-DI)
+  ขาลง: ตรงข้ามทั้งหมด
 
-สัญญาณเดียว ต้องผ่านทุกเงื่อนไขพร้อมกันหมด (AND เข้มสุดตามที่ตกลงกันไว้)
-ไปทิศทางเดียวกันทั้งหมด ทำทั้งขาขึ้น (BUY) และขาลง (SELL):
-
-1. Sideway breakout                    (เกิดขึ้นภายใน M1_PULLBACK_LOOKBACK_BARS แท่งล่าสุด)
-2. EMA50 ตัด EMA100                    (ยืนยัน trend ใหญ่ เกิดขึ้นภายในกรอบเวลาเดียวกัน)
-3. EMA9 ตัด EMA20                      (จุดตัดบนแท่งล่าสุดพอดี = trigger จริง, ต้องเกิด "หลัง"
-                                         จุดตัด EMA50x100 = pullback confirmation)
-4. MACD                                (เส้น MACD อยู่เหนือ/ใต้ Signal ตรงทิศทาง)
-5. RSI                                 (RSI > 50 = ขึ้น, RSI < 50 = ลง)
-6. ADX + DI                            (ADX >= เกณฑ์ = trend แรงพอ, DI+/DI- ยืนยันทิศทาง)
-
-หมายเหตุ: ไม่ใช้ Volume เป็นเงื่อนไขแล้ว (คู่เงิน Forex ส่วนใหญ่บน Yahoo
-Finance ไม่มีข้อมูล Volume จริง เป็นตลาด OTC) ใช้ MACD/RSI/ADX ยืนยัน
-โมเมนตัมแทนทั้งหมด
-
-ใช้หลักการเดียวกันหมดกับทุก symbol ในลิสต์ (รวมทองคำ GC=F ด้วย - ไม่มี
-การแยก logic พิเศษให้ symbol ใดเป็นการเฉพาะ)
-
-ตัดแท่งสุดท้ายที่ "ยังไม่ปิด" ออกก่อนคำนวณ indicator เสมอ (yfinance คืน
-แท่งปัจจุบันที่กำลังก่อตัวมาด้วย ถ้าไม่ตัดออก ค่า EMA/MACD/RSI/ADX จะ
-repaint ได้ก่อนแท่งนั้นปิดจริง)
+evaluate() คืนค่า dict: {"signal": "buy"/"sell"/None, "reason": str, "details": {...}}
 """
-
+import numpy as np
 import pandas as pd
-import config
-from lib.indicators import ema, atr, macd, rsi, adx_di
+
+from lib import indicators as ind
 
 
-def drop_unclosed_candle(df: pd.DataFrame) -> pd.DataFrame:
-    """ตัดแท่งสุดท้ายออก (ถือว่ายังไม่ปิด/กำลังก่อตัว) เหลือเฉพาะแท่งที่ปิดแล้วจริง"""
-    if df is None or len(df) <= 1:
-        return df
-    return df.iloc[:-1]
-
-
-# ==========================================================
-# Sideway zone + Breakout (ใช้ index อ้างอิงแบบยืดหยุ่น เพื่อให้ค้นหา
-# ย้อนหลังในกรอบเวลาได้ ไม่ใช่เช็คแค่แท่งล่าสุดแท่งเดียวเหมือนเดิม)
-# ==========================================================
-
-def _sideway_zone_ending_at(df: pd.DataFrame, end_pos: int):
+def _trend_direction(ema_fast: pd.Series, ema_slow: pd.Series, lookback: int):
     """
-    หา high/low ของกรอบ sideway จาก M1_SIDEWAY_LOOKBACK แท่ง ที่ "จบก่อน"
-    ตำแหน่ง end_pos (ไม่รวม end_pos เอง) แล้วเช็คว่าแคบพอ (เทียบ ATR)
-    คืน {"high", "low"} หรือ None ถ้าไม่ใช่ sideway / ข้อมูลไม่พอ
+    หาทิศทางเทรนด์จากจุดตัด EMA fast/slow ล่าสุดในช่วง lookback แท่งที่ผ่านมา
+    (นับจากแท่งสุดท้าย ณ ปัจจุบันย้อนหลังไป)
+    คืนค่า ('up'/'down'/None, cross_index หรือ None)
+    ถ้าหาจุดตัดไม่เจอในช่วง lookback จะ fallback ไปใช้ความสัมพันธ์ปัจจุบันของ fast vs slow แทน
     """
-    lookback = config.M1_SIDEWAY_LOOKBACK
-    start = end_pos - lookback
-    if start < 0 or end_pos >= len(df) or end_pos < 1:
-        return None
+    diff = ema_fast - ema_slow
+    n = len(diff)
+    if n < 2:
+        return None, None
 
-    window = df.iloc[start:end_pos]
-    zone_high = float(window["High"].max())
-    zone_low = float(window["Low"].min())
-    zone_range = zone_high - zone_low
-
-    atr_series = atr(df, config.M1_ATR_PERIOD)
-    atr_at = atr_series.iloc[end_pos - 1]
-    if pd.isna(atr_at) or atr_at <= 0:
-        return None
-
-    if (zone_range / atr_at) > config.M1_SIDEWAY_MAX_RANGE_ATR_RATIO:
-        return None  # กรอบกว้างเกินไป ไม่ใช่ sideway จริง
-
-    return {"high": zone_high, "low": zone_low}
-
-
-def _breakout_direction_at(df: pd.DataFrame, pos: int, zone: dict):
-    """เช็คแท่งที่ตำแหน่ง pos ว่าทะลุกรอบ sideway ทางไหน คืน 'up' / 'down' / None"""
-    close = float(df["Close"].iloc[pos])
-    buf = config.M1_BREAKOUT_BUFFER_PCT / 100
-
-    if close > zone["high"] * (1 + buf):
-        return "up"
-    if close < zone["low"] * (1 - buf):
-        return "down"
-    return None
-
-
-def find_recent_breakout(df: pd.DataFrame, direction: str, upto_pos: int, lookback_bars: int):
-    """
-    ค้นหาย้อนหลังจากตำแหน่ง upto_pos (รวม upto_pos) ถอยไปไม่เกิน lookback_bars
-    แท่ง ว่ามีแท่งไหนเป็น breakout ไปทิศทาง direction บ้าง (ไม่เช็ค volume
-    แล้ว - ใช้ MACD/RSI/ADX ยืนยันโมเมนตัมแทนที่ด้านล่าง)
-    คืน position ของแท่งที่เจอ (ล่าสุดที่เจอ) หรือ None ถ้าไม่เจอเลย
-    """
-    earliest = max(0, upto_pos - lookback_bars + 1)
-    for pos in range(upto_pos, earliest - 1, -1):
-        zone = _sideway_zone_ending_at(df, pos)
-        if zone is None:
+    start = max(1, n - lookback)
+    for i in range(n - 1, start - 1, -1):
+        prev = diff.iloc[i - 1]
+        curr = diff.iloc[i]
+        if pd.isna(prev) or pd.isna(curr):
             continue
-        d = _breakout_direction_at(df, pos, zone)
-        if d != direction:
-            continue
-        return pos
-    return None
+        if prev <= 0 and curr > 0:
+            return "up", i
+        if prev >= 0 and curr < 0:
+            return "down", i
+
+    # ไม่เจอจุดตัดในช่วง lookback -> ใช้ความสัมพันธ์ปัจจุบันแทน (เทรนด์เป็นมานานแล้ว)
+    last = diff.iloc[-1]
+    if pd.isna(last):
+        return None, None
+    if last > 0:
+        return "up", None
+    if last < 0:
+        return "down", None
+    return None, None
 
 
-# ==========================================================
-# EMA cross (ใช้ตำแหน่งยืดหยุ่นเหมือนกัน - ต้องหาได้ทั้งที่แท่งล่าสุด
-# (EMA9x20 trigger) และค้นย้อนหลังในกรอบเวลา (EMA50x100 confirmation)
-# ==========================================================
-
-def _ema_cross_direction_at(df: pd.DataFrame, fast_period: int, slow_period: int, pos: int):
-    """เช็คว่าแท่งที่ตำแหน่ง pos เป็นแท่งที่ EMA fast ตัด EMA slow หรือไม่ คืน 'up' / 'down' / None"""
-    if pos < 1:
-        return None
-
-    close = df["Close"]
-    ema_fast = ema(close, fast_period)
-    ema_slow = ema(close, slow_period)
-
-    prev_fast, prev_slow = ema_fast.iloc[pos - 1], ema_slow.iloc[pos - 1]
-    now_fast, now_slow = ema_fast.iloc[pos], ema_slow.iloc[pos]
-
-    if pd.isna(prev_fast) or pd.isna(prev_slow) or pd.isna(now_fast) or pd.isna(now_slow):
-        return None
-
-    if prev_fast <= prev_slow and now_fast > now_slow:
-        return "up"
-    if prev_fast >= prev_slow and now_fast < now_slow:
-        return "down"
-    return None
-
-
-def find_recent_ema_cross(df: pd.DataFrame, fast_period: int, slow_period: int,
-                           direction: str, upto_pos: int, lookback_bars: int):
-    """ค้นหาย้อนหลังจาก upto_pos ถอยไปไม่เกิน lookback_bars แท่ง หาแท่งที่ EMA ตัดไปทิศทาง direction"""
-    earliest = max(1, upto_pos - lookback_bars + 1)
-    for pos in range(upto_pos, earliest - 1, -1):
-        d = _ema_cross_direction_at(df, fast_period, slow_period, pos)
-        if d == direction:
-            return pos
-    return None
-
-
-# ==========================================================
-# MACD / RSI / ADX confirmation (เช็คที่แท่ง trigger เท่านั้น - เป็นตัว
-# กรองสถานะโมเมนตัม/ความแรงเทรนด์ ณ จุดที่จะยิงสัญญาณ ไม่ใช่ trigger เอง)
-# ==========================================================
-
-def _macd_confirms(df: pd.DataFrame, pos: int, direction: str) -> bool:
-    close = df["Close"]
-    macd_line, signal_line, _ = macd(
-        close, config.M1_MACD_FAST, config.M1_MACD_SLOW, config.M1_MACD_SIGNAL
-    )
-    m, s = macd_line.iloc[pos], signal_line.iloc[pos]
-    if pd.isna(m) or pd.isna(s):
-        return False
-    return bool((m > s) if direction == "up" else (m < s))
-
-
-def _rsi_confirms(df: pd.DataFrame, pos: int, direction: str) -> bool:
-    r = rsi(df["Close"], config.M1_RSI_PERIOD).iloc[pos]
-    if pd.isna(r):
-        return False
-    if direction == "up":
-        return bool(r > config.M1_RSI_BULL_THRESHOLD)
-    return bool(r < config.M1_RSI_BEAR_THRESHOLD)
-
-
-def _adx_confirms(df: pd.DataFrame, pos: int, direction: str) -> bool:
-    adx_series, plus_di, minus_di = adx_di(df, config.M1_ADX_PERIOD)
-    a, p, m = adx_series.iloc[pos], plus_di.iloc[pos], minus_di.iloc[pos]
-    if pd.isna(a) or pd.isna(p) or pd.isna(m):
-        return False
-    if a < config.M1_ADX_MIN:
-        return False  # trend ไม่แรงพอ ไม่ว่าจะทิศไหน
-    return bool((p > m) if direction == "up" else (m > p))
-
-
-# ==========================================================
-# MAIN EVALUATION
-# ==========================================================
-
-def evaluate_symbol(symbol: str, df_m1: pd.DataFrame):
+def evaluate(df: pd.DataFrame, config) -> dict:
     """
-    ประเมิน M1 เดี่ยว ๆ ต้องผ่านครบทุกเงื่อนไข (AND เข้มสุด) ถึงจะคืนสัญญาณ:
-
-      trigger  = แท่งล่าสุดที่ปิดแล้ว เป็นแท่งที่ EMA9 ตัด EMA20 (ทิศทาง D)
-      +        = ภายใน M1_PULLBACK_LOOKBACK_BARS แท่งก่อนหน้า (นับถึง trigger)
-                 เคยมี EMA50 ตัด EMA100 ไปทิศทาง D มาก่อนแล้ว (pullback
-                 confirmation - EMA9x20 ต้องตัด "หลัง" EMA50x100)
-      +        = ภายในกรอบเวลาเดียวกัน เคยมี sideway breakout ไปทิศทาง D
-                 มาก่อนแล้วเช่นกัน (ไม่เช็ค volume แล้ว)
-      +        = ที่แท่ง trigger: MACD, RSI, ADX+DI ยืนยันทิศทาง D ทั้งหมด
-
-    ไม่ผ่านข้อใดข้อหนึ่ง -> คืน None ใช้หลักการเดียวกันหมดกับทุก symbol
+    df: DataFrame ที่มีคอลัมน์ Open, High, Low, Close (แท่งสุดท้ายต้องเป็นแท่งที่ปิดแล้ว)
+    config: module หรือ object ที่มี EMA_TREND_FAST, EMA_TREND_SLOW, TREND_CROSS_LOOKBACK_BARS,
+            EMA_SIGNAL_FAST, EMA_SIGNAL_SLOW, MACD_FAST/SLOW/SIGNAL, RSI_PERIOD, RSI_MID,
+            ADX_PERIOD, ADX_MIN
     """
-    if df_m1 is None or df_m1.empty:
-        return None
+    close = df["Close"]
 
-    df = drop_unclosed_candle(df_m1)
+    ema_trend_fast = ind.ema(close, config.EMA_TREND_FAST)
+    ema_trend_slow = ind.ema(close, config.EMA_TREND_SLOW)
+    ema_sig_fast = ind.ema(close, config.EMA_SIGNAL_FAST)
+    ema_sig_slow = ind.ema(close, config.EMA_SIGNAL_SLOW)
 
-    min_needed = (
-        max(config.M1_EMA_SLOW, config.M1_SIDEWAY_LOOKBACK)
-        + config.M1_PULLBACK_LOOKBACK_BARS
-        + 5
+    macd_line, macd_signal, _ = ind.macd(
+        close, config.MACD_FAST, config.MACD_SLOW, config.MACD_SIGNAL
     )
-    if df is None or df.empty or len(df) < min_needed:
-        return None
+    rsi = ind.rsi(close, config.RSI_PERIOD)
+    adx, plus_di, minus_di = ind.adx_di(df, config.ADX_PERIOD)
 
-    trigger_pos = len(df) - 1
+    required = [
+        ema_trend_fast, ema_trend_slow, ema_sig_fast, ema_sig_slow,
+        macd_line, macd_signal, rsi, adx, plus_di, minus_di,
+    ]
+    if any(pd.isna(s.iloc[-1]) for s in required):
+        return {"signal": None, "reason": "not_enough_data", "details": {}}
 
-    # 1) trigger จริง: EMA9 ตัด EMA20 บนแท่งล่าสุด
-    direction = _ema_cross_direction_at(
-        df, config.M1_EMA_PULLBACK_FAST, config.M1_EMA_PULLBACK_SLOW, trigger_pos
+    trend, cross_idx = _trend_direction(
+        ema_trend_fast, ema_trend_slow, config.TREND_CROSS_LOOKBACK_BARS
     )
-    if direction is None:
-        return None
 
-    # 2) EMA50 ตัด EMA100 ไปทิศทางเดียวกัน ต้องเกิด "ก่อน" trigger ภายในกรอบเวลา
-    #    (pullback confirmation: EMA9x20 คือแท่งล่าสุด จึงหาย้อนตั้งแต่แท่งก่อนแท่ง trigger)
-    ema_main_pos = find_recent_ema_cross(
-        df, config.M1_EMA_FAST, config.M1_EMA_SLOW, direction,
-        upto_pos=trigger_pos - 1, lookback_bars=config.M1_PULLBACK_LOOKBACK_BARS,
-    )
-    if ema_main_pos is None:
-        return None
-
-    # 3) Sideway breakout ไปทิศทางเดียวกัน ภายในกรอบเวลาเดียวกัน
-    breakout_pos = find_recent_breakout(
-        df, direction, upto_pos=trigger_pos, lookback_bars=config.M1_PULLBACK_LOOKBACK_BARS,
-    )
-    if breakout_pos is None:
-        return None
-
-    # 4) MACD / 5) RSI / 6) ADX+DI - เช็คที่แท่ง trigger เท่านั้น ต้องผ่านทุกตัว
-    if not _macd_confirms(df, trigger_pos, direction):
-        return None
-    if not _rsi_confirms(df, trigger_pos, direction):
-        return None
-    if not _adx_confirms(df, trigger_pos, direction):
-        return None
-
-    last = df.iloc[trigger_pos]
-    return {
-        "symbol": symbol,
-        "direction": direction,
-        "trigger_time": str(df.index[trigger_pos]),
-        "trigger_price": float(last["Close"]),
-        "ema_main_cross_time": str(df.index[ema_main_pos]),
-        "breakout_time": str(df.index[breakout_pos]),
+    details = {
+        "trend": trend,
+        "ema9": round(float(ema_sig_fast.iloc[-1]), 6),
+        "ema25": round(float(ema_sig_slow.iloc[-1]), 6),
+        "ema100": round(float(ema_trend_fast.iloc[-1]), 6),
+        "ema300": round(float(ema_trend_slow.iloc[-1]), 6),
+        "macd": round(float(macd_line.iloc[-1]), 6),
+        "macd_signal": round(float(macd_signal.iloc[-1]), 6),
+        "rsi": round(float(rsi.iloc[-1]), 2),
+        "adx": round(float(adx.iloc[-1]), 2),
+        "plus_di": round(float(plus_di.iloc[-1]), 2),
+        "minus_di": round(float(minus_di.iloc[-1]), 2),
     }
+
+    if trend is None:
+        return {"signal": None, "reason": "no_trend", "details": details}
+
+    ema9 = ema_sig_fast.iloc[-1]
+    ema25 = ema_sig_slow.iloc[-1]
+    macd_v = macd_line.iloc[-1]
+    macd_s = macd_signal.iloc[-1]
+    rsi_v = rsi.iloc[-1]
+    adx_v = adx.iloc[-1]
+    pdi = plus_di.iloc[-1]
+    mdi = minus_di.iloc[-1]
+
+    strong_enough = adx_v >= config.ADX_MIN
+
+    if trend == "up":
+        aligned = ema9 > ema25
+        macd_ok = macd_v > macd_s
+        rsi_ok = rsi_v > config.RSI_MID
+        di_ok = pdi > mdi
+        if aligned and macd_ok and rsi_ok and di_ok and strong_enough:
+            return {"signal": "buy", "reason": "ok", "details": details}
+        return {"signal": None, "reason": "conditions_not_met_up", "details": details}
+
+    if trend == "down":
+        aligned = ema9 < ema25
+        macd_ok = macd_v < macd_s
+        rsi_ok = rsi_v < config.RSI_MID
+        di_ok = mdi > pdi
+        if aligned and macd_ok and rsi_ok and di_ok and strong_enough:
+            return {"signal": "sell", "reason": "ok", "details": details}
+        return {"signal": None, "reason": "conditions_not_met_down", "details": details}
+
+    return {"signal": None, "reason": "no_trend", "details": details}

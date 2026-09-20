@@ -1,47 +1,59 @@
 """
-Data fetcher - ดึงแท่งเทียน M1 อย่างเดียวจาก yfinance (บอทนี้ดูแค่ timeframe เดียว)
-ใช้ curl_cffi impersonation + jitter delay ตามที่เคยแก้ปัญหาโดน Yahoo rate-limit บน GitHub Actions IP มาก่อน
+ดึงข้อมูลราคา M1 จาก Yahoo Finance (yfinance)
+ใช้ curl_cffi session แบบ impersonate browser กัน rate-limit/block บน shared IP ของ GitHub Actions
+ตัดแท่งสุดท้ายที่ยังไม่ปิด (unclosed candle) ออกเสมอ เพื่อไม่ให้อินดิเคเตอร์คำนวณจากแท่งที่ยังไม่จบ
 """
-
 import time
 import random
+
 import pandas as pd
 import yfinance as yf
 
 try:
-    from curl_cffi import requests as cffi_requests
-    _SESSION = cffi_requests.Session(impersonate="chrome")
-except Exception:
-    _SESSION = None  # fallback เฉย ๆ ถ้าไม่มี curl_cffi ติดตั้ง
-
-MAX_RETRIES = 3
-BASE_DELAY = 1.0
-
-# ต้องมีแท่งพอสำหรับ EMA100 + lookback ต่าง ๆ (M1_EMA_SLOW=100 คือค่าที่มากสุด)
-# ต้องมีแท่งพอสำหรับ EMA100 (M1_EMA_SLOW) + กรอบค้นหาย้อนหลัง
-# (M1_PULLBACK_LOOKBACK_BARS) + sideway lookback + buffer กันขอบเขตข้อมูล
-MIN_CANDLES_REQUIRED = 200
+    from curl_cffi import requests as curl_requests
+    _HAS_CURL_CFFI = True
+except ImportError:
+    _HAS_CURL_CFFI = False
 
 
-def fetch_m1(symbol: str) -> pd.DataFrame | None:
-    """คืน DataFrame M1 (Open/High/Low/Close/Volume, index เป็นเวลา) หรือ None ถ้าดึงไม่สำเร็จ"""
+def _make_session():
+    if not _HAS_CURL_CFFI:
+        return None
+    return curl_requests.Session(impersonate="chrome")
+
+
+def fetch_m1(ticker: str, interval: str, period: str, max_retries: int = 3) -> pd.DataFrame:
+    """
+    คืน DataFrame คอลัมน์ Open/High/Low/Close/Volume, index เป็นเวลา (ตัดแท่งสุดท้ายที่ยังไม่ปิดออกแล้ว)
+    คืน DataFrame ว่างถ้าดึงไม่สำเร็จหลัง retry ครบ
+    """
     last_err = None
-
-    for attempt in range(1, MAX_RETRIES + 1):
+    for attempt in range(max_retries):
         try:
-            ticker = yf.Ticker(symbol, session=_SESSION) if _SESSION else yf.Ticker(symbol)
-            # yfinance จำกัด interval="1m" ย้อนหลังได้สูงสุด ~7 วัน - ขอ 5d ให้ปลอดภัย
-            df = ticker.history(period="5d", interval="1m")
-            if df is None or df.empty:
-                raise RuntimeError("empty dataframe")
-            df = df.dropna(subset=["Close"])
-            if len(df) < MIN_CANDLES_REQUIRED:
-                raise RuntimeError(f"too few candles ({len(df)})")
-            return df
-        except Exception as e:
-            last_err = e
-            # jitter delay กันโดน rate-limit ซ้ำ
-            time.sleep(BASE_DELAY * attempt + random.uniform(0, 0.5))
+            session = _make_session()
+            tk = yf.Ticker(ticker, session=session) if session else yf.Ticker(ticker)
+            df = tk.history(interval=interval, period=period, auto_adjust=False)
 
-    print(f"[data_fetcher] FAILED {symbol} M1: {last_err}")
-    return None
+            if df is None or df.empty:
+                raise ValueError("empty dataframe")
+
+            df = df[["Open", "High", "Low", "Close", "Volume"]].dropna(
+                subset=["Open", "High", "Low", "Close"]
+            )
+
+            # ตัดแท่งสุดท้ายทิ้งเสมอ เพราะแท่ง M1 ล่าสุดที่ yfinance คืนมามักยังไม่ปิดจริง
+            if len(df) > 1:
+                df = df.iloc[:-1]
+
+            if df.empty:
+                raise ValueError("dataframe empty after dropping unclosed candle")
+
+            return df
+
+        except Exception as e:  # noqa: BLE001
+            last_err = e
+            if attempt < max_retries - 1:
+                time.sleep(1.0 + random.random() * 1.5)
+
+    print(f"[data_fetcher] fetch failed for {ticker}: {last_err}")
+    return pd.DataFrame()

@@ -1,45 +1,43 @@
 """
-LINE notify - ส่งข้อความสั้นต่อ 1 สัญญาณ (รูปแบบคล้าย format_forex_message ในบอทหลัก)
+ส่งข้อความเข้า LINE Official Account ผ่าน Messaging API
+- ถ้ามี LINE_TARGET_IDS -> push ไปหาแต่ละ id (comma-separated)
+- ถ้าไม่มี -> broadcast ไปหาทุกคนที่แอดเพื่อน OA
+- ถ้าไม่มี LINE_CHANNEL_ACCESS_TOKEN -> print ออก console แทน (โหมดทดสอบ)
 """
-
 import requests
-import config
 
-LINE_PUSH_URL = "https://api.line.me/v2/bot/message/push"
-
-
-def format_m1_alert(signal: dict) -> str:
-    """
-    ข้อความสั้น ประหยัดความยาว - สัญญาณเดียวที่ผ่านครบทุกเงื่อนไข AND แล้ว
-    (breakout+vol, EMA50x100, EMA9x20 pullback, MACD, RSI, ADX+DI)
-    """
-    arrow = "⬆️BUY" if signal["direction"] == "up" else "⬇️SELL"
-    sym = signal["symbol"].replace("=X", "").replace("=F", "")
-    return (
-        f"🎯{sym} {arrow} @ {signal['trigger_price']}\n"
-        f"BO+EMA50x100+Pullback9x20+MACD+RSI+ADX"
-    )
+PUSH_URL = "https://api.line.me/v2/bot/message/push"
+BROADCAST_URL = "https://api.line.me/v2/bot/message/broadcast"
 
 
-def send_line_message(text: str) -> bool:
-    if not config.LINE_CHANNEL_ACCESS_TOKEN or not config.LINE_TARGET_IDS:
-        print("[line_notify] missing token or target ids, skip send")
-        return False
-
+def _post(url: str, token: str, payload: dict) -> bool:
     headers = {
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {config.LINE_CHANNEL_ACCESS_TOKEN}",
+        "Authorization": f"Bearer {token}",
     }
+    resp = requests.post(url, headers=headers, json=payload, timeout=15)
+    ok = 200 <= resp.status_code < 300
+    if not ok:
+        print(f"[line_notify] send failed ({resp.status_code}): {resp.text}")
+    return ok
 
-    ok_all = True
-    for target_id in config.LINE_TARGET_IDS:
-        payload = {"to": target_id, "messages": [{"type": "text", "text": text}]}
-        try:
-            resp = requests.post(LINE_PUSH_URL, headers=headers, json=payload, timeout=10)
-            if resp.status_code != 200:
-                print(f"[line_notify] FAILED to {target_id}: {resp.status_code} {resp.text}")
-                ok_all = False
-        except Exception as e:
-            print(f"[line_notify] error sending to {target_id}: {e}")
-            ok_all = False
-    return ok_all
+
+def send_message(text: str, config) -> bool:
+    token = config.LINE_CHANNEL_ACCESS_TOKEN
+    target_ids = [t.strip() for t in (config.LINE_TARGET_IDS or "").split(",") if t.strip()]
+
+    if not token:
+        print(f"[line_notify][DRY RUN - no token] {text}")
+        return True
+
+    message = {"type": "text", "text": text}
+
+    if target_ids:
+        all_ok = True
+        for target_id in target_ids:
+            payload = {"to": target_id, "messages": [message]}
+            all_ok = _post(PUSH_URL, token, payload) and all_ok
+        return all_ok
+
+    payload = {"messages": [message]}
+    return _post(BROADCAST_URL, token, payload)

@@ -1,11 +1,12 @@
-name: M1 Trigger Scan
+name: M1 EMA Trigger Scan
 
 on:
   schedule:
-    # GitHub Actions รองรับ cron ต่ำสุดจริง ๆ ได้ประมาณ 5 นาที (และมักดีเลย์เพิ่มอีก 2-10 นาทีตามคิวจริง)
-    # ถ้าต้องการความถี่ระดับ 1 นาทีจริง ให้ดู README.md หัวข้อ "ทางเลือก hosting" แทน
     - cron: "*/5 * * * *"
   workflow_dispatch: {}
+
+permissions:
+  contents: write
 
 jobs:
   scan:
@@ -20,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Run M1 trigger scan
+      - name: Run scan
         env:
           LINE_CHANNEL_ACCESS_TOKEN: ${{ secrets.LINE_CHANNEL_ACCESS_TOKEN }}
           LINE_TARGET_IDS: ${{ secrets.LINE_TARGET_IDS }}
@@ -31,5 +32,5 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add state.json
-          git diff --staged --quiet || git commit -m "chore: update state.json [skip ci]"
+          git diff --quiet --cached || git commit -m "chore: update state.json [skip ci]"
           git push
