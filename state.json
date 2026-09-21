@@ -1,1 +1,8 @@
-{}
+{
+  "AUDUSD": {
+    "last_signal": "buy"
+  },
+  "NZDUSD": {
+    "last_signal": "buy"
+  }
+}
