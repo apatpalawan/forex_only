@@ -1,8 +1,14 @@
 {
   "AUDUSD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "NZDUSD": {
+    "last_signal": "sell"
+  },
+  "EURUSD": {
+    "last_signal": "sell"
+  },
+  "EURGBP": {
     "last_signal": "sell"
   }
 }
