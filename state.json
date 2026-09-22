@@ -18,6 +18,9 @@
     "last_signal": null
   },
   "EURJPY": {
-    "last_signal": "sell"
+    "last_signal": null
+  },
+  "GBPJPY": {
+    "last_signal": "buy"
   }
 }
