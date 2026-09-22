@@ -15,10 +15,10 @@
     "last_signal": null
   },
   "USDJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "EURJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "GBPJPY": {
     "last_signal": "buy"
