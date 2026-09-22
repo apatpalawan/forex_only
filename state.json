@@ -12,9 +12,9 @@
     "last_signal": null
   },
   "GBPUSD": {
-    "last_signal": "sell"
+    "last_signal": null
   },
   "USDJPY": {
-    "last_signal": "buy"
+    "last_signal": "sell"
   }
 }
