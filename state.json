@@ -21,13 +21,13 @@
     "last_signal": null
   },
   "GBPJPY": {
-    "last_signal": "sell"
-  },
-  "USDCAD": {
     "last_signal": null
   },
+  "USDCAD": {
+    "last_signal": "sell"
+  },
   "XAUUSD": {
-    "last_signal": "buy"
+    "last_signal": null
   },
   "USDCHF": {
     "last_signal": null
