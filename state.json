@@ -15,7 +15,7 @@
     "last_signal": null
   },
   "USDJPY": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "EURJPY": {
     "last_signal": null
@@ -24,12 +24,12 @@
     "last_signal": null
   },
   "USDCAD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "XAUUSD": {
     "last_signal": null
   },
   "USDCHF": {
-    "last_signal": null
+    "last_signal": "sell"
   }
 }
