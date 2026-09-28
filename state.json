@@ -9,13 +9,13 @@
     "last_signal": null
   },
   "EURGBP": {
-    "last_signal": "sell"
+    "last_signal": null
   },
   "GBPUSD": {
     "last_signal": null
   },
   "USDJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "EURJPY": {
     "last_signal": null
