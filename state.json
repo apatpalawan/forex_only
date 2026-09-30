@@ -9,7 +9,7 @@
     "last_signal": null
   },
   "EURGBP": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "GBPUSD": {
     "last_signal": null
@@ -24,7 +24,7 @@
     "last_signal": null
   },
   "USDCAD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "XAUUSD": {
     "last_signal": null
