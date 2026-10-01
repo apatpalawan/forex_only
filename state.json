@@ -27,9 +27,9 @@
     "last_signal": null
   },
   "XAUUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "USDCHF": {
-    "last_signal": null
+    "last_signal": "sell"
   }
 }
