@@ -3,7 +3,7 @@
     "last_signal": null
   },
   "NZDUSD": {
-    "last_signal": "buy"
+    "last_signal": null
   },
   "EURUSD": {
     "last_signal": null
@@ -30,6 +30,6 @@
     "last_signal": null
   },
   "USDCHF": {
-    "last_signal": null
+    "last_signal": "sell"
   }
 }
