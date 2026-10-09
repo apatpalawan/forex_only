@@ -1,6 +1,6 @@
 {
   "AUDUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "NZDUSD": {
     "last_signal": null
@@ -9,16 +9,16 @@
     "last_signal": null
   },
   "EURGBP": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "GBPUSD": {
     "last_signal": null
   },
   "USDJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "EURJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "GBPJPY": {
     "last_signal": null
