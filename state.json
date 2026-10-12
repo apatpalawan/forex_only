@@ -6,28 +6,28 @@
     "last_signal": null
   },
   "EURUSD": {
-    "last_signal": "buy"
+    "last_signal": null
   },
   "EURGBP": {
-    "last_signal": "buy"
+    "last_signal": null
   },
   "GBPUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "USDJPY": {
-    "last_signal": "sell"
+    "last_signal": null
   },
   "EURJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "GBPJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "USDCAD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "XAUUSD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "USDCHF": {
     "last_signal": null
