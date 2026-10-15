@@ -3,33 +3,33 @@
     "last_signal": null
   },
   "NZDUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "EURUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "EURGBP": {
     "last_signal": null
   },
   "GBPUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "USDJPY": {
     "last_signal": null
   },
   "EURJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "GBPJPY": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "USDCAD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "XAUUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "USDCHF": {
-    "last_signal": null
+    "last_signal": "sell"
   }
 }
