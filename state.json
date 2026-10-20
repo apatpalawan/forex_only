@@ -6,7 +6,7 @@
     "last_signal": null
   },
   "EURUSD": {
-    "last_signal": null
+    "last_signal": "buy"
   },
   "EURGBP": {
     "last_signal": null
@@ -24,12 +24,12 @@
     "last_signal": null
   },
   "USDCAD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "XAUUSD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "USDCHF": {
-    "last_signal": null
+    "last_signal": "sell"
   }
 }
