@@ -9,7 +9,7 @@
     "last_signal": null
   },
   "EURGBP": {
-    "last_signal": "sell"
+    "last_signal": null
   },
   "GBPUSD": {
     "last_signal": null
@@ -30,6 +30,6 @@
     "last_signal": null
   },
   "USDCHF": {
-    "last_signal": null
+    "last_signal": "buy"
   }
 }
