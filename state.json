@@ -3,7 +3,7 @@
     "last_signal": null
   },
   "NZDUSD": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "EURUSD": {
     "last_signal": null
@@ -15,7 +15,7 @@
     "last_signal": null
   },
   "USDJPY": {
-    "last_signal": "buy"
+    "last_signal": null
   },
   "EURJPY": {
     "last_signal": null
