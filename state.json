@@ -18,7 +18,7 @@
     "last_signal": "sell"
   },
   "EURJPY": {
-    "last_signal": "sell"
+    "last_signal": null
   },
   "GBPJPY": {
     "last_signal": null
@@ -30,6 +30,6 @@
     "last_signal": "sell"
   },
   "USDCHF": {
-    "last_signal": "sell"
+    "last_signal": null
   }
 }
