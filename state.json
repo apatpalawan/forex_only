@@ -3,7 +3,7 @@
     "last_signal": null
   },
   "NZDUSD": {
-    "last_signal": "sell"
+    "last_signal": null
   },
   "EURUSD": {
     "last_signal": null
@@ -15,7 +15,7 @@
     "last_signal": null
   },
   "USDJPY": {
-    "last_signal": null
+    "last_signal": "sell"
   },
   "EURJPY": {
     "last_signal": null
@@ -24,7 +24,7 @@
     "last_signal": null
   },
   "USDCAD": {
-    "last_signal": "buy"
+    "last_signal": null
   },
   "XAUUSD": {
     "last_signal": null
